@@ -1,6 +1,6 @@
 # Fetch Documentation Sources
 
-OpenCrane can automatically fetch documentation files from GitHub repositories. Documentation is fetched from the **latest release** of each repository. The primary mechanism for fetching is through a scheduled GitHub Actions workflow that runs on a defined cadence to keep documentation up-to-date.
+OpenCrane can automatically fetch documentation files from GitHub repositories. Documentation is fetched from the **latest release** of each repository, or from the default branch when a repository has no releases. An entry with `manual: true` can pin a `branch`, `tag`, `release`, or `sha` instead. OpenCrane ignores these fields on auto-discovered entries. The primary mechanism for fetching is through a scheduled GitHub Actions workflow that runs on a defined cadence to keep documentation up-to-date.
 
 ## GitHub Actions Workflow
 
@@ -9,7 +9,7 @@ A typical `update-docs.yml` workflow fetches documentation from one or more orga
 - **Auto-discovery**: Repos tagged with a specific topic (e.g., `"documentation"`) are discovered automatically
 - **Manual repositories**: Specific repos can be added in your source mapping config with `manual: true`
 
-**Auto-discovery configuration**: The `AUTO_DISCOVERY_ORGS` environment variable controls which organizations have auto-discovery turned on. It takes a comma-separated list, for example `AUTO_DISCOVERY_ORGS=my-org,other-org`, and is empty by default. The `--org` flag also turns on auto-discovery for the organization it names.
+**Auto-discovery configuration**: The `AUTO_DISCOVERY_ORGS` environment variable controls which organizations have auto-discovery turned on. It takes a comma-separated list, for example `AUTO_DISCOVERY_ORGS=my-org,other-org`, and is empty by default. The `--org` flag also turns on auto-discovery for the organization it names. Each fetch discovers repositories in one organization only: the one that `--org` or the `ORG_NAME` environment variable names. Auto-discovery runs only if that organization is in `AUTO_DISCOVERY_ORGS`.
 
 The workflow makes sure that your project always operates on the latest docs.
 
@@ -25,7 +25,7 @@ The fetch process automatically cleans up stale documentation sources:
 - **Directory Cleanup**: Deletes both source directories and generated output (`llmstxt/`)
 - **Manual Entry Protection**: Entries marked as `manual: true` are never automatically removed
 - **Local Entry Protection**: Entries marked as `local: true` are never fetched or removed (they reference local filesystem paths)
-- **Org Filtering**: The `--org` flag filters which repos are processed - repos from other orgs are skipped (not removed)
+- **Org Filtering**: The `--org` flag filters which auto-discovered repos are processed - auto-discovered entries from other orgs are skipped (not removed). Entries with `manual: true` are fetched whatever their org
 - **Failure Protection**: Repos that **fail to fetch** (network errors, no files, etc.) are NOT removed - only repos that lose the topic are removed
 
 This prevents accumulation of outdated documentation while protecting against temporary failures.
@@ -36,6 +36,9 @@ Running locally is intended **only for testing purposes** or in exceptional case
 
 ### Fetch from a specific organization
 
+> [!CAUTION]
+> This command deletes the local source directory and the generated `llmstxt/` output of every auto-discovered repository in the organization that lost the discovery topic. To keep such a source, set `manual: true` on its entry before you run the command.
+
 ```bash
 # Fetch from an organization (auto-discovers repos with the configured topic)
 opencrane fetch --config yourproject.config:YourConfig --org my-org
@@ -43,10 +46,13 @@ opencrane fetch --config yourproject.config:YourConfig --org my-org
 
 ### Fetch a single repository
 
-Use `--source {PATH_KEY}` to restrict the fetch to one entry from your source mapping config, or pass a comma-separated list of path keys. The path key is the top-level key under `sources:` in that file, for example `my-repo`. `--repo` is an alias for `--source`. The org filter is bypassed automatically when `--source` is used, so no `--org` flag is needed.
+Use `--source {PATH_KEY}` to restrict the fetch to one entry from your source mapping config, or pass a comma-separated list of path keys. The path key is the top-level key under `sources:` in that file, for example `my-repo`. `--repo` is an alias for `--source`. For entries with `manual: true`, the org filter does not apply, so no `--org` flag is needed. To refresh an auto-discovered entry, also pass `--org` with its organization.
+
+> [!CAUTION]
+> If a source you name is auto-discovered and lost the discovery topic, this command deletes its local source directory and its generated `llmstxt/` output. To keep the source, set `manual: true` on its entry before you run the command.
 
 ```bash
-# Fetch only one repo — no --org needed
+# Fetch only one manual entry, no --org needed
 opencrane fetch --config yourproject.config:YourConfig --source my-repo
 ```
 

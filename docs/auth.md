@@ -106,7 +106,7 @@ auth:
 | `oidc.issuer` | Yes | External IdP issuer URL |
 | `oidc.audience` | Yes¹ | Resource identifier — the `aud` claim in tokens must include this value |
 | `oidc.scope_claim` | No | JWT claim name to read scopes from (default: `scope`) |
-| `oidc.verify_audience` | No | Enforce the `aud` binding (default: `true`). Set to `false` only for IdPs that cannot stamp the audience — see below. |
+| `oidc.verify_audience` | No | Enforce the `aud` binding (default: `true`). Set to `false` only for IdPs that cannot stamp the audience — see below. With `false`, OpenCrane accepts tokens that the IdP issued for other services. |
 | `oidc.advertised_scopes` | No | Scope names published as `scopes_supported` in the protected-resource metadata. Advertised only, never enforced — see below. |
 
 ¹ Required unless `oidc.verify_audience: false`, in which case `oidc.audience` is optional.
@@ -157,8 +157,8 @@ This is a deliberate security trade-off — a token this IdP issues for any reso
 By default `oauth` mode requires a valid bearer token on every request (tokenless
 requests get `401`).
 
-> [!IMPORTANT]
-> With `allow_anonymous: true`, anyone can read the sources in `default_sources` without a token. List only public documentation in `default_sources`.
+> [!CAUTION]
+> With `allow_anonymous: true`, anyone can read the sources in `default_sources` without a token. If you set neither `scope_sources` nor `default_sources`, anyone can read every source. Set `default_sources`, and list only public documentation in it.
 
 Set `allow_anonymous: true` to make the token **optional**:
 
@@ -208,7 +208,7 @@ auth:
 3. If no scope matches any key in `scope_sources`, fall back to `default_sources`. If `default_sources` is also absent, the caller sees no results.
 4. Intersect `allowed` with any `source_names` parameter supplied by the client (narrow-only — the client can restrict, never expand).
 5. If the resulting set is empty, **short-circuit to zero results** — an empty list is never forwarded to the backend (which would disable the filter and return all sources).
-6. If `scope_sources` is not configured at all, authenticated callers may access all sources (useful for a simple "authenticated = full access" gate with `local` mode).
+6. If neither `scope_sources` nor `default_sources` is configured, OpenCrane does not restrict sources, and every caller may access all sources (useful for a simple "authenticated = full access" gate with `local` mode). If only `default_sources` is configured, every caller gets `default_sources`.
 
 Source names in `scope_sources` and `default_sources` must match names in `sources:` in the same config file; unknown names are rejected at startup.
 
@@ -217,6 +217,9 @@ Source names in `scope_sources` and `default_sources` must match names in `sourc
 ## `custom` mode — escape-hatch for operator-supplied auth
 
 Set `auth.type: custom` in config and provide either `token_verifier` or `auth_provider` on your `OpenCraneConfig` subclass in `.opencrane/extensions.py`.
+
+> [!CAUTION]
+> If neither hook is set, the `custom` type runs with no authentication and accepts every request. Set `token_verifier` or `auth_provider` before you expose the server.
 
 ### `token_verifier` (resource-server mode)
 
@@ -243,9 +246,6 @@ from my_package.auth import MyAuthProvider
 class Config(OpenCraneConfig):
     auth_provider = MyAuthProvider()
 ```
-
-> [!CAUTION]
-> If neither hook is set, the `custom` type runs with no authentication and accepts every request. Set `token_verifier` or `auth_provider` before you expose the server.
 
 ---
 
@@ -279,9 +279,12 @@ class Config(OpenCraneConfig):
 
 A common pattern: read the caller's bearer token, ask an external service which
 sources the caller may see, and cache the answer per token. A missing token or a
-failed lookup leaves the override unset, so the request falls back to
-`default_sources` (fail closed). This is how a downstream project keeps its own
+failed lookup leaves the override unset, so the request falls back to the
+endpoint's `scope_sources` and `default_sources` policy. This is how a downstream project keeps its own
 authorization logic out of OpenCrane.
+
+> [!CAUTION]
+> The fallback is restricted only if the endpoint sets `scope_sources` or `default_sources`. Without them, any request that the middleware does not resolve, such as a failed lookup, gives the caller every source. Set `default_sources` on the endpoint before you rely on this middleware.
 
 ```python
 # .opencrane/extensions.py
@@ -329,7 +332,7 @@ class PermissionsAuthorizer:
                 names = await self._allowed(token)
                 if names is not None:
                     set_allowed_sources(names)   # authenticated caller → permitted sources
-                # no token, or a failed lookup → override stays unset → default_sources
+                # no token, or a failed lookup → override stays unset → scope_sources/default_sources policy
         await self.app(scope, receive, send)
 
 
@@ -355,6 +358,9 @@ At search time `set_allowed_sources` takes **highest precedence** — above the 
 
 By default the `auth:` block is a single **flat** block and produces one MCP endpoint at `/mcp`. To serve **several endpoints from one deployment**, each with its own authentication, make `auth:` a **map of named entries**. Each key becomes an endpoint served at `/mcp/<name>`; each value is a full auth block (the same keys documented above — `type`, `oidc`, `scope_sources`, `default_sources`, …).
 
+> [!CAUTION]
+> A `type: none` endpoint without `default_sources` serves every source to anyone, including sources meant for the authenticated endpoint. Always set `default_sources` on an open endpoint.
+
 ```yaml
 # .opencrane/config.yaml
 auth:
@@ -379,7 +385,7 @@ For a `type: oauth` endpoint, its RFC 9728 protected-resource metadata and `WWW-
 - **Backward compatible.** No `auth:` block, or a flat block with a top-level `type:` (or any single-block key such as `scope_sources`), still means a single endpoint at `/mcp`. Nothing changes for existing configs.
 - **Endpoint names** may contain letters, digits, `-` and `_`. They must not collide with the reserved single-block keys (`type`, `allow_anonymous`, `scope_sources`, `default_sources`, `oidc`, `local`) — such a name would make the block parse as a single flat endpoint instead.
 - **`allow_anonymous` is not supported for named endpoints.** Model open access as a `type: none` endpoint and authenticated access as a strict `type: oauth` endpoint; mixing the two on one path is exactly what the optional-auth mode was a single-endpoint workaround for. Setting it on a named entry fails closed at startup.
-- **At most one authenticated endpoint.** Because the SDK applies token verification as app-level middleware across the merged routes, a deployment may expose only one authenticating endpoint (`oauth`, `local`, or `custom`); pair it with any number of `type: none` endpoints. Two authenticated endpoints fail closed at startup. (A single open + single authenticated endpoint — the common public/private split — is fully supported.)
+- **At most one authenticated endpoint.** Because the SDK applies token verification as app-level middleware across the merged routes, a deployment may expose only one authenticating endpoint (`oauth`, `local`, or `custom` with a `token_verifier` or `auth_provider` hook; a `custom` endpoint with neither hook is open); pair it with any number of `type: none` endpoints. Two authenticated endpoints fail closed at startup. (A single open + single authenticated endpoint — the common public/private split — is fully supported.)
 - **Advertised topics are scoped per endpoint.** The `search_docs` tool's advertised topic list and `source_names` enum are scoped to what the endpoint serves, so an open endpoint does not expose the names of private topics served elsewhere. A `type: none` endpoint with `default_sources` advertises only those sources; every other endpoint (open with no `default_sources`, or authenticated — where per-caller sources are resolved at request time) advertises all sources. This scopes only the advertised metadata; result-level authorization is always enforced separately.
 - **Shared `/health`.** All endpoints share one readiness probe at `/health`.
 
@@ -387,14 +393,14 @@ For a `type: oauth` endpoint, its RFC 9728 protected-resource metadata and `WWW-
 
 ## stdio transport
 
-The stdio transport is always unauthenticated. OAuth applies to the HTTP transport only. When running `opencrane serve --transport stdio`, the server trusts the process's environment for credentials (per the MCP specification) and Layer-2 scope enforcement is bypassed (all sources are accessible).
+The stdio transport is always unauthenticated. OAuth applies to the HTTP transport only. When running `opencrane serve --transport stdio`, the server trusts the process's environment for credentials (per the MCP specification). The caller has no scopes, so the root endpoint's Layer-2 policy decides what it sees. With a flat `auth:` block, the caller gets `default_sources`, or all sources if neither `scope_sources` nor `default_sources` is set. With a named `auth:` map, there is no root endpoint, so the stdio caller gets no results.
 
 ---
 
 ## Security notes
 
 - `PUBLIC_URL` must be HTTPS in production. The SDK permits `http://localhost` for local development only.
-- `oauth` mode enforces **audience binding** — tokens not explicitly minted for `oidc.audience` are rejected (prevents confused-deputy attacks).
+- `oauth` mode enforces **audience binding** — tokens not explicitly minted for `oidc.audience` are rejected (prevents confused-deputy attacks). The exception is `oidc.verify_audience: false`, which skips this check.
 - `local` mode credentials come from environment variables only — never the config file. Constant-time comparison is used for token matching.
 - Layer-2 enforcement is **server-side only** — the client-supplied `source_names` parameter can only narrow, never expand, the set of accessible sources.
 - Fail-closed: misconfigured auth (missing `PUBLIC_URL`, unknown source names, missing `opencrane[auth]` extra) raises an error at startup and refuses to serve.

@@ -39,7 +39,7 @@ Using the wrapper script:
 
 - **Unit tests only**: `./pytest.sh tests/unit/`
 - **Integration tests only**: `./pytest.sh tests/integration/`
-- **Specific test file**: `./pytest.sh tests/unit/test_github_client.py`
+- **Specific test file**: `./pytest.sh tests/unit/test_cli.py`
 
 ## Additional Options
 

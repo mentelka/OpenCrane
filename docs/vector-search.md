@@ -89,7 +89,7 @@ Search indexed documentation. The description and available chunk types are dyna
 - `limit` (integer, optional): Maximum number of results (1-50, default: 5)
 - `search_mode` (string, optional): Search mode - "semantic", "keyword", or "hybrid" (default: "hybrid")
 - `alpha` (number, optional): Weight for semantic score in hybrid mode (0-1, default: 0.6)
-- `chunk_types` (array, optional): Filter by content type - "prose", "code_snippet", "crd_definition", "openapi_spec", "json_schema", "yaml_content", "list_item", "table_row"
+- `chunk_types` (array, optional): Filter by content type - "prose", "code_snippet", "crd_definition", "openapi_spec", "json_schema", "yaml_content", "list_item", "table_row". The tool schema lists only the types present in the index.
 - `metadata_contains` (array, optional): Filter by metadata content (AND logic)
 - `source_names` (array, optional): Restrict results to one or more configured sources (OR logic). Values must be path keys from `.opencrane/config.yaml` sources (e.g. `MicrosoftDocs/microsoft-style-guide`). The tool schema only advertises this parameter when sources are configured, and the enum lists the exact valid values.
 
@@ -106,7 +106,7 @@ search_docs(
 
 ### 2. `get_yaml_definition`
 
-Retrieve complete YAML definition for CRD, OpenAPI, or JSON Schema chunks with breadcrumb comments showing location in tree.
+Retrieve complete YAML definition for CRD, OpenAPI, or JSON Schema chunks with breadcrumb comments showing location in tree. Available only when the index contains CRD, OpenAPI, or JSON Schema chunks.
 
 **Parameters:**
 - `chunk_id` (string, required): The chunk ID from search results
@@ -124,9 +124,10 @@ get_yaml_definition(chunk_id="abc123...")
 
 ### 3. `get_metadata_schema`
 
-Retrieve comprehensive documentation of all metadata fields available in chunks. Use this to understand what metadata fields mean and how to use them programmatically.
+Retrieve comprehensive documentation of all metadata fields available in chunks. Use this to understand what metadata fields mean and how to use them programmatically. Available only when the index contains CRD, OpenAPI, JSON Schema, `list_item`, or `table_row` chunks.
 
-**Parameters:** None
+**Parameters:**
+- `chunk_type` (string, optional): Return only the section for this chunk type, for example `list_item`. When omitted, the full schema is returned.
 
 **Returns:** Complete metadata schema documentation including:
 - Universal metadata fields (`source_url`, `original_format`, `schema_type`)
@@ -144,6 +145,7 @@ Retrieve comprehensive documentation of all metadata fields available in chunks.
 **Example:**
 ```python
 get_metadata_schema()
+get_metadata_schema(chunk_type="list_item")
 ```
 
 ### 4. `get_list_members`

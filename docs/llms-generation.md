@@ -60,7 +60,7 @@ Within `llms-full.txt`, boundaries are marked structurally:
 1. `<!-- opencrane:page -->` — separates the individual files (pages) that make up one source. This is a collision-proof HTML-comment sentinel (invisible when rendered) rather than a dash rule, because a markdown thematic break (`---`, `-----`) in page content would be indistinguishable from a dash-based separator and silently split the page.
 2. `======` — separates one source's block from the next in the combined bundle
 
-Each page begins with a single `# {title}` H1 heading (see [Page titles](#page-titles)). Image references are stripped and relative links are rewritten so they continue to work in the flattened output.
+Each page begins with a `# {title}` H1 heading (see [Page titles](#page-titles)). Each image reference is replaced with an `[Image removed: {alt text}]` note, and relative links are rewritten so they continue to work in the flattened output.
 
 Example structure of the combined `llms-full.txt`:
 ```markdown
@@ -100,7 +100,7 @@ Next to every `llms-full.txt`, the `llms` step writes a standard `llms.txt` inde
 - [Overview](https://beta.example.com/docs/overview)
 ```
 
-- A top-level `# {project}` H1.
+- A top-level `# Documentation` H1.
 - One `## {source}` section per source, in the **same order** as the corresponding `======` blocks in `llms-full.txt`.
 - One `- [{title}]({page_url})` link per page, in the **same order** as the `<!-- opencrane:page -->`-separated pages inside that source's block.
 
@@ -116,4 +116,4 @@ Each page's title is chosen with this precedence:
 2. **First heading** — the first Markdown heading in the body.
 3. **Filename** — derived from the file stem (e.g. `getting-started.md` → "Getting Started").
 
-The page block's leading H1 in `llms-full.txt` is normalized to equal the chosen title (a synthetic `# {title}` is prepended when the body has no matching leading H1). This keeps the H1 exactly equal to the matching `llms.txt` index entry so the title-validated join stays exact.
+OpenCrane prepends a `# {title}` heading with the chosen title to each page block in `llms-full.txt`, unless the body already starts with exactly that heading. An existing H1 with different text stays in place under the new heading. This keeps the H1 exactly equal to the matching `llms.txt` index entry so the title-validated join stays exact.

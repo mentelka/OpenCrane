@@ -3,14 +3,14 @@
 After chunking documentation, generate vector embeddings for semantic search:
 
 ```bash
-opencrane embed --config yourproject.config:YourConfig
+opencrane embed
 ```
 
 ## What happens
 
 - Loads chunks from `.opencrane/chunks.json`
-- Uses Nomic Embed model (nomic-ai/nomic-embed-text-v1.5)
-- Generates vector embeddings (dimensions depend on model)
+- Uses Nomic Embed model (nomic-ai/nomic-embed-text-v1.5) by default. To use a different model, set the `EMBEDDING_MODEL` environment variable
+- Generates vector embeddings. The Milvus collection stores 768-dimension vectors, which matches the default model. A model with a different dimension produces vectors that the `index` step cannot load
 - Processes in batches to avoid memory issues
 - Saves to `.opencrane/embeddings.json`
 
@@ -18,8 +18,8 @@ opencrane embed --config yourproject.config:YourConfig
 
 When loaded into Milvus, each chunk becomes a vector with fields:
 - `chunk_id` (VARCHAR, primary key)
-- `embedding` (FLOAT_VECTOR, dimensions match embedding model)
-- `content` (VARCHAR, up to 65KB)
+- `embedding` (FLOAT_VECTOR, 768 dimensions)
+- `content` (VARCHAR, `max_length` 65,535)
 - `source_file` (VARCHAR)
 - `source_name` (VARCHAR)
 - `chunk_type` (VARCHAR: prose/code_snippet/crd_definition/openapi_spec/json_schema/yaml_content/list_item/table_row)

@@ -5,7 +5,7 @@
 - **Unit tests** (`tests/unit/`) - Fast, mocked dependencies, run during development (~10s)
 - **Integration tests** (`tests/integration/`) - Real services, slower, marked with `@pytest.mark.integration` (~2-3min)
   - Includes **acceptance tests** - end-to-end tests via MCP protocol using production data
-- **Coverage requirement** - 100% enforced by pytest.ini
+- **Coverage requirement** - 100% enforced by `./pytest.sh --check-coverage`
 
 ## Quick Reference
 
@@ -18,8 +18,6 @@
 
 # Run only unit tests (fast iteration)
 ./pytest.sh tests/unit/
-# or
-pytest
 
 # Run only integration tests
 ./pytest.sh -m integration
@@ -30,9 +28,9 @@ pytest
 
 ## Why pytest.sh?
 
-The `./pytest.sh` script runs ALL tests by default (overriding pytest.ini which skips integration tests). It also:
+The `./pytest.sh` script runs ALL tests by default. It also:
 - Auto-activates `.venv`
 - Sets PYTHONPATH correctly
 - Provides `--check-coverage` flag for CI/CD
 
-Use `pytest` directly for quick unit-test-only iterations during development.
+Use `./pytest.sh tests/unit/` for quick unit-test-only iterations during development.

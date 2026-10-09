@@ -71,7 +71,7 @@ This command creates the `.opencrane/` directory with the project configuration 
 
 ## Installation
 
-OpenCrane requires Python 3.11 or later. The base package runs the MCP server on an index that is already built. To build an index with the `fetch`, `llms`, `chunk`, and `embed` steps, install the `pipeline` extra:
+OpenCrane requires Python 3.11 or later. The base package runs the MCP server on an index that is already built. To build an index with the `fetch`, `llms`, `chunk`, and `embed` steps, or to run `tokens`, install the `pipeline` extra:
 
 ```bash
 # with pip
@@ -107,7 +107,7 @@ Creates the `.opencrane/` directory with the following files:
 | `.opencrane/extensions.py` | Template for custom Python extensions. Generated only with `--extensions` |
 
 > [!CAUTION]
-> `--force` replaces `.opencrane/README.md`, the container files, and `.opencrane/extensions.py` with fresh templates, so you lose your changes to them. Commit or back up those files before you run `opencrane init --force`.
+> `--force` replaces `.opencrane/README.md`, the container files, and, with `--extensions`, `.opencrane/extensions.py` with fresh templates, so you lose your changes to them. Commit or back up those files before you run `opencrane init --force`.
 
 | Flag | Description |
 |---|---|
@@ -116,7 +116,7 @@ Creates the `.opencrane/` directory with the following files:
 | `--no-add` | Skip the interactive source addition prompt (useful for CI/scripts) |
 | `--extensions` | Generate `.opencrane/extensions.py` for custom Python extensions |
 
-> **Convention**: OpenCrane auto-discovers `.opencrane/extensions.py` as the project extensions config, so no `--config` flag or `OPENCRANE_CONFIG` env var is needed when using the `.opencrane/` layout.
+> **Convention**: OpenCrane loads `.opencrane/extensions.py` as the project extensions config when `.opencrane/config.yaml` has the `extensions: extensions.py` key. The generated `config.yaml` has this key commented out, so uncomment it. The class in the file must be named `Config`. With this key set, you don't need the `--config` flag or the `OPENCRANE_CONFIG` env var.
 
 After scaffolding, `init` prompts you to add documentation sources interactively (same flow as `opencrane add`). Use `--no-add` to skip the prompt.
 
@@ -128,7 +128,7 @@ opencrane add
 
 Interactively add documentation sources to your project. The command loops, asking for each source:
 
-1. **GitHub repository** — adds an entry to `.opencrane/config.yaml` with the repo URL, docs path, and optional published docs URL. The `fetch` step will clone it on the next `opencrane build`.
+1. **GitHub repository** — adds an entry to `.opencrane/config.yaml` with the repo URL, docs path, and optional published docs URL. The `fetch` step downloads its documentation on the next `opencrane build`.
 2. **Existing llms.txt file** — provide a URL or local file path. OpenCrane downloads/copies it into `.opencrane/llmstxt/<name>/llms-full.txt`, and (when available) fetches the upstream companion `llms.txt` next to it for real per-page source URLs. The `llms` step merges it into the combined index and the `chunk` step assigns per-page `source_url`.
 
 After each source, you're asked whether to add another or finish.
@@ -210,11 +210,23 @@ opencrane embed [--config CLASS] [--chunks-file PATH] [--embeddings-file PATH]
 |---|---|
 | `--chunks-file PATH` | Input chunks JSON file (overrides `AI_DOCS_CHUNKS_FILE` env var) |
 | `--embeddings-file PATH` | Output embeddings JSON file (overrides `AI_DOCS_EMBEDDINGS_FILE` env var) |
+| `--force` | Regenerate the embeddings even if the chunks have not changed since the last run. Without it, the command skips the step when the chunks are unchanged |
 
 #### `opencrane index` — load into Milvus
 
 ```bash
 opencrane index [--config CLASS]
+```
+
+When the Milvus collection already has rows, the command skips indexing and keeps the existing data. This also applies to the index step of `opencrane build`. As a result, after a documentation update, `opencrane build` leaves the old data in Milvus. When the collection lacks fields that the current version needs, the command drops and rebuilds it automatically.
+
+> [!CAUTION]
+> `DROP_EXISTING=true` deletes the Milvus collection before the command rebuilds it. On a Milvus server that an MCP server already uses, searches fail until the rebuild finishes. Before you run the command, confirm that the Milvus variables point to the collection that you want to replace.
+
+To replace the existing data, set `DROP_EXISTING=true`:
+
+```bash
+DROP_EXISTING=true opencrane index
 ```
 
 #### `opencrane serve` — start MCP server
@@ -230,7 +242,7 @@ opencrane serve [--config CLASS] [--transport stdio|http]
 
 ##### Health endpoint (`/health`)
 
-The HTTP transport exposes `GET /health` for container liveness/readiness probes (e.g. Cloud Run). It is an **honest, query-aware** check: rather than only confirming that services are wired up, it runs a real one-result search behind a timeout, reports memory headroom from the cgroup, and reports whether the heavy in-memory chunk maps are already resident. The overall `status` is the worst of the individual checks:
+The HTTP transport exposes `GET /health` for container liveness/readiness probes (e.g. Cloud Run). It is an **honest, query-aware** check: rather than only confirming that services are wired up, it runs a real one-result search behind a timeout, reports memory headroom from the cgroup, and reports whether the keyword (BM25) search index is already loaded in memory. The overall `status` is the worst of the individual checks:
 
 | `status` | HTTP code | Meaning |
 |---|---|---|
@@ -249,8 +261,7 @@ Example response (`200`):
     "milvus_service": "healthy",
     "collection_stats": { "row_count": 1234 },
     "heavy_maps": {
-      "chunk_index_resident": true,
-      "chunk_source_map_resident": true
+      "keyword_index_resident": true
     },
     "memory": {
       "source": "cgroup_v2",
@@ -297,7 +308,7 @@ The generated package includes the Milvus database and chunk index — recipient
 
 Run `opencrane build` before packing. Use `--version` to bump the version when re-packing updated docs (so `uvx` pulls the new version instead of serving its cache).
 
-Install the optional `build` dependency for wheel generation: `pip install opencrane[pack]`.
+Install the optional `build` dependency for wheel generation: `pip install 'opencrane[pack]'`.
 
 #### `opencrane inspect` — launch MCP Inspector
 
@@ -375,7 +386,7 @@ CLI flags take precedence over environment variables. Use env vars for persisten
 
 | Variable | Default | Description |
 |---|---|---|
-| `MAPPING_FILE` | `.opencrane/config.yaml` | Path to the source mapping file used by `fetch` (to record cloned repos) and `llms` (to build per-page source URLs in the companion `llms.txt` index) |
+| `MAPPING_FILE` | `.opencrane/config.yaml` | Path to the source mapping file used by `fetch` (to record fetched repos) and `llms` (to build per-page source URLs in the companion `llms.txt` index) |
 
 **`fetch` step** — only needed if you use `opencrane fetch` to pull docs from GitHub:
 
@@ -429,6 +440,7 @@ OpenCrane supports two Milvus modes. By default it uses **Milvus Lite**, a local
 | `MILVUS_COLLECTION` | `ai_docs_chunks_v1` | Milvus collection name |
 | `MILVUS_INSERT_BATCH_SIZE` | `2000` | Max chunks per insert call during `index`. Keeps each call short enough to finish before Milvus keepalive timeouts, which would otherwise trigger client retries that duplicate rows |
 | `HYBRID_ALPHA` | `0.6` | Weight of vector search vs keyword search (1.0 = pure vector, 0.0 = pure BM25) |
+| `DROP_EXISTING` | `false` | When `true`, `index` deletes and rebuilds the Milvus collection. Without it, `index` skips a collection that already has rows. See [`opencrane index`](#opencrane-index--load-into-milvus) |
 
 #### Health check (`serve`, HTTP transport)
 
@@ -443,13 +455,13 @@ Tune the [`/health`](#health-endpoint-health) probe and thresholds. All optional
 
 ### Source mapping file (`.opencrane/config.yaml`)
 
-OpenCrane maintains a file called `.opencrane/config.yaml` that records where each documentation source lives and where its content can be found online. It is used by the `fetch` step (to track cloned repos) and by the `llms` step (to build the companion `llms.txt` index of per-page source URLs). The `fetch` step populates it automatically; for manually managed sources you can edit it directly.
+OpenCrane maintains a file called `.opencrane/config.yaml` that records where each documentation source lives and where its content can be found online. It is used by the `fetch` step (to track fetched repos) and by the `llms` step (to build the companion `llms.txt` index of per-page source URLs). The `fetch` step populates it automatically; for manually managed sources you can edit it directly.
 
 Each entry supports the following fields:
 
 | Field | Required | Description |
 |---|---|---|
-| `url` | Yes (for `fetch`) | GitHub repository URL — used by `opencrane fetch` to clone the repo and to build per-page GitHub source URLs in the companion `llms.txt` index |
+| `url` | Yes (for `fetch`) | GitHub repository URL — used by `opencrane fetch` to download the docs and to build per-page GitHub source URLs in the companion `llms.txt` index |
 | `docs_path` | No | Path within the repo where docs are stored (e.g. `docs`) |
 | `docs_url` | No | Base URL of the published documentation site (e.g. `https://docs.example.com/product`). When set, per-page URLs are built from it instead of `url` — lets AI agents point users to rendered docs rather than raw GitHub files. For external `llmstxt` sources with no companion `llms.txt`, `docs_url` is used as the base URL for every page in that bundle. If neither is set, chunks from that source get no `source_url`. |
 | `manual` | No | When `true`, the entry is user-managed and will not be overwritten by `opencrane fetch` auto-discovery |
@@ -458,7 +470,7 @@ Each entry supports the following fields:
 | `release` | No | Pin to a specific GitHub release by its tag name (e.g. `v2.1.0`) — validated via the Releases API |
 | `sha` | No | Pin to a specific commit SHA |
 
-**Ref pinning**: By default, `opencrane fetch` pulls from the latest GitHub release, falling back to the default branch if no releases exist. Use `branch`, `tag`, `release`, or `sha` to pin a source to a specific ref instead. Only one should be set; if multiple are present, priority is `sha` > `tag` > `release` > `branch` (a warning is logged).
+**Ref pinning**: By default, `opencrane fetch` pulls from the latest GitHub release, falling back to the default branch if no releases exist. Use `branch`, `tag`, `release`, or `sha` to pin a source to a specific ref instead. Only one should be set; if multiple are present, priority is `sha` > `tag` > `release` > `branch` (a warning is logged). OpenCrane applies a pin only to entries with `manual: true`. The `opencrane add` command sets this field for you.
 
 Example:
 
@@ -557,7 +569,7 @@ An override takes precedence over `section_anchor_style`.
 
 ### Built-in fence types
 
-`openapi`, `asyncapi`, `crd`, and `json-schema` are registered by default in `OpenCraneConfig`. Each uses the `opencrane.fences.inline_file` handler, which reads the file path written inside the fence block, inlines the file content, and adds a `### URL` section marker so the chunker assigns a per-file source URL to the resulting chunks.
+`openapi`, `asyncapi`, `crd`, and `json-schema` are registered by default in `OpenCraneConfig`. Each uses the `opencrane.fences.inline_file` handler, which reads the file path written inside the fence block, inlines the file content, and adds a `### {source_url}` heading so the chunker assigns a per-file source URL to the resulting chunks.
 
 Usage in markdown:
 
@@ -571,7 +583,7 @@ path/to/asyncapi.yaml
 ```
 ````
 
-No `extensions.py` is needed for these types. To extend with additional fence types that use the same inlining behaviour, pass `**OpenCraneConfig.fence_types` when defining `fence_types` in your config subclass (as shown in the example above).
+No `extensions.py` is needed for these types. To keep these built-in types when you add your own, pass `**OpenCraneConfig.fence_types` when defining `fence_types` in your config subclass (as shown in the example above).
 
 ### Built-in YAML tree walkers
 
@@ -610,7 +622,7 @@ fence_types = {
 }
 ```
 
-`inline_file` reads the file path from the fence block content, inlines the file, and adds a `### URL` source annotation so the chunker assigns per-file source URLs to the resulting chunks.
+`inline_file` reads the file path from the fence block content, inlines the file, and adds a `### {source_url}` heading so the chunker assigns per-file source URLs to the resulting chunks.
 
 ### Writing a custom YAML tree walker
 
@@ -631,11 +643,11 @@ class TerraformTreeWalker(YamlTreeWalker):
 
 The HTTP transport (`opencrane serve --transport http`) supports OAuth 2.1 authentication and scope-based content authorization. The stdio transport is always open (per the MCP spec).
 
-- **`local` mode** — OpenCrane acts as its own authorization server. An MCP client is redirected to a browser login form where the consumer pastes a token or enters a username/password. No external identity provider needed. Configure via `auth.type: local` and set `PUBLIC_URL` + `OPENCRANE_ACCESS_TOKEN` (or `OPENCRANE_LOGIN_USER`/`OPENCRANE_LOGIN_PASS`).
+- **`local` mode** — OpenCrane acts as its own authorization server. When an MCP client starts authorization, OpenCrane redirects the browser to its `/login` form, where the consumer pastes a token or enters a username/password. No external identity provider needed. Configure via `auth.type: local` and set `PUBLIC_URL` + `OPENCRANE_ACCESS_TOKEN` (or `OPENCRANE_LOGIN_USER`/`OPENCRANE_LOGIN_PASS`).
 - **`oauth` mode** — OpenCrane is an OAuth resource server; token issuance is handled by an external IdP (Keycloak, Auth0, Entra, …). Requires `pip install 'opencrane[auth]'`. Configure via `auth.type: oauth` with `oidc.issuer` and `oidc.audience`.
 - **Scope-based source gating** — `scope_sources` maps OAuth scopes to sets of documentation sources. Callers only retrieve content from sources their token's scopes permit.
 - **`middleware` hook** — for authorization that config cannot express, register a custom ASGI middleware on your `OpenCraneConfig` subclass and call `set_allowed_sources(...)` to declare a request's permitted sources (e.g. resolve them from an external permissions service). Keeps project-specific auth logic out of OpenCrane.
-- **`custom` mode** — supply your own `token_verifier` or `auth_provider` on `OpenCraneConfig` for full control over token validation or the authorization server.
+- **`custom` mode** — set `auth.type: custom` and supply your own `token_verifier` or `auth_provider` on `OpenCraneConfig` for full control over token validation or the authorization server.
 
 See [docs/auth.md](docs/auth.md) for the full configuration reference, environment variables, and worked examples (including a complete external-permissions middleware).
 
@@ -651,7 +663,7 @@ pip install -e ".[dev]"
 # with uv
 uv sync --extra dev
 
-pytest
+./pytest.sh
 ```
 
 ## License

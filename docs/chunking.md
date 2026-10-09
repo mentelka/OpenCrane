@@ -49,7 +49,7 @@ Every Markdown table becomes one `table_row` chunk per data row, rendered as nat
 
 To fetch the full table from a row chunk, call `get_table_members(table_id=...)` using the `table_id` field in the row chunk's metadata. This returns all sibling row chunks ordered by `row_index`.
 
-A table with no heading or lead-in sentence in the source still produces `table_row` chunks, but the heading and description fields will be empty. Add a heading and a lead-in sentence in the source to make those chunks retrievable by semantic search.
+A table with no heading or lead-in sentence in the source still produces `table_row` chunks, but those chunks have no `breadcrumb_path` or `table_caption` metadata. Add a heading and a lead-in sentence in the source to make those chunks retrievable by semantic search.
 
 The fixture pair `tests/fixtures/markdown_with_table.md` and `tests/fixtures/expected_table_chunks.json` is a generated baseline that shows the chunks produced for a representative table document. Regenerate `expected_table_chunks.json` with `ChunkSerializer.serialize_chunks` when chunking behavior changes intentionally.
 
@@ -143,7 +143,19 @@ All chunks include a `metadata` object with type-specific fields:
 - Usage: Route to appropriate schema validators and processors
 - Present in: YAML chunks (crd_definition, openapi_spec, json_schema)
 
+###### `section_anchor` (string, optional)
+- Purpose: In-page anchor slug of the section the chunk comes from. A direct section link is `{source_url}#{section_anchor}`.
+- Example: `"prerequisites"`
+- Present in: Prose, list item, and table row chunks that have a `source_url` and sit under a heading of level 2 or deeper. Structured YAML chunks have no anchor.
+- Turn it off with `section_anchor_style: none` in `.opencrane/config.yaml`.
+
 ##### Prose Chunks (`chunk_type: "prose"`)
+
+###### `breadcrumb_path` (string, optional)
+- Purpose: Location of the chunk in the page
+- Format: `page title > section`, where the section is the first heading of level 2 or deeper in the chunk. Only the page title when the chunk has no such heading.
+- Example: `"Setup Guide > Prerequisites"`
+- Present in: Prose chunks whose `source_url` is listed in the `llms.txt` index
 
 ##### Code Chunks (`chunk_type: "code_snippet"`)
 
@@ -157,17 +169,17 @@ All chunks include a `metadata` object with type-specific fields:
 - Purpose: Tab identifier for parallel instructions
 - Format: Value attribute from `<Tab>` component
 - Usage: Filter code examples by implementation type
-- Present in: Code blocks within `<Tabs>` components
+- Present in: Code blocks within `<Tabs>` components, when a custom chunking strategy sets it. The built-in strategies do not set it.
 
 ###### `tab_label` (string, optional)
 - Purpose: Human-readable tab label
 - Format: Label attribute from `<Tab>` component
 - Usage: Display tab context in RAG responses
-- Present in: Code blocks within `<Tabs>` components
+- Present in: Code blocks within `<Tabs>` components, when a custom chunking strategy sets it. The built-in strategies do not set it.
 
 ##### CRD Chunks (`chunk_type: "crd_definition"`)
 
-**Chunking Strategy**: Property-based recursive chunking with token limits (300-800 tokens):
+**Chunking Strategy**: Property-based recursive chunking with an 800-token limit:
 - Each `spec.properties` field is evaluated for token count
 - If ≤ 800 tokens: chunk as-is with nested content
 - If > 800 tokens AND has nested `properties`: recurse into nested properties, create separate chunks
@@ -197,7 +209,7 @@ Examples:
 - Purpose: Track sibling chunks at same tree level
 - Format: Array of `chunk_id` values
 - Definition: Neighbors = chunks sharing the same `logical_parent`, at any depth
-- Example: `spec.replicas`, `spec.image`, `spec.config` all share parent → All reference each other's UUIDs
+- Example: `spec.replicas`, `spec.image`, `spec.config` all share parent → All reference each other's chunk IDs
 - Empty Array: No neighbors when only child under parent exists
 - Usage: Context expansion - fetch neighbors to provide additional related information
 
@@ -225,7 +237,7 @@ Examples:
 
 ##### OpenAPI Chunks (`chunk_type: "openapi_spec"`)
 
-**Chunking Strategy**: Element-based recursive chunking with token limits (300-800 tokens):
+**Chunking Strategy**: Element-based recursive chunking with an 800-token limit:
 - Top-level elements (`info`, `servers`, `security`, `tags`) → single chunks
 - Path operations (GET, POST, etc.) → separate chunks per method
 - Component schemas:
@@ -240,7 +252,7 @@ Examples:
 
 ##### JSON Schema Chunks (`chunk_type: "json_schema"`)
 
-**Chunking Strategy**: Property and definition-based recursive chunking with token limits (300-800 tokens):
+**Chunking Strategy**: Property and definition-based recursive chunking with an 800-token limit:
 - Root metadata (title, description) → single chunk if present
 - Properties:
   - If ≤ 800 tokens: chunk property as-is with nested content
@@ -337,7 +349,9 @@ To add support for a new content type (e.g., JSON, XML, custom markdown componen
    from pathlib import Path
    from typing import List
    from opencrane.rag.services.base_strategy import ProcessingStrategy
+   from opencrane.rag.services.utils.chunk_id_generator import generate_unique_chunk_id
    from opencrane.shared.models.chunk import Chunk
+   from opencrane.shared.utils.token_counter import get_token_count
 
    class MyCustomStrategy(ProcessingStrategy):
        def can_process(self, node) -> bool:
@@ -350,19 +364,20 @@ To add support for a new content type (e.g., JSON, XML, custom markdown componen
            chunks = []
 
            # Extract content
-           content = self._extract_content(node)
+           content = node.text.removeprefix('{{custom}}').strip()
 
-           # Create chunk with metadata
-           metadata = {
-               "custom_field": "value",
-           }
+           # chunk_type must be one of the built-in values. Prose chunks accept
+           # only these metadata keys: source_url, breadcrumb_path,
+           # section_anchor, tab_value, tab_label, and key.
+           metadata = {}
 
            chunk = Chunk(
+               chunk_id=generate_unique_chunk_id(content, str(source_file), "prose", metadata),
                content=content,
                source_file=str(source_file),
-               chunk_type="custom_type",
+               chunk_type="prose",
                metadata=metadata,
-               token_count=self._count_tokens(content)
+               token_count=get_token_count(content)
            )
 
            chunks.append(chunk)
@@ -391,6 +406,8 @@ To add support for a new content type (e.g., JSON, XML, custom markdown componen
            ProseChunkingStrategy(),  # Priority 6: Prose (fallback)
        ]
    ```
+
+   OpenCrane loads `.opencrane/extensions.py` only when `.opencrane/config.yaml` sets `extensions: extensions.py`, and the class must be named `Config`. Otherwise, pass the class with `--config`.
 
    **Important**: Strategy order matters! First matching strategy wins. Place specific strategies before general ones.
 
@@ -448,23 +465,30 @@ To add support for new YAML-based specifications (e.g., AsyncAPI, GraphQL schema
            """Process info section."""
            yaml_str = yaml.dump(info, default_flow_style=False)
            token_count = get_token_count(yaml_str)
+           source_file = self.source_file or self.source_url
+           metadata = {
+               "source_url": self.source_url,
+               "breadcrumb_path": "info",
+               "logical_parent": "root",
+               "neighbor_chunks": [],
+               "original_format": "yaml",
+               "schema_type": "asyncapi",
+               "asyncapi_version": self.asyncapi_version,
+               "asyncapi_element": "info"
+           }
 
            chunk = Chunk(
-               chunk_id=self._generate_chunk_id(),
+               chunk_id=self._generate_chunk_id(
+                   content=info,
+                   chunk_type="asyncapi_spec",
+                   metadata=metadata,
+                   source_file=source_file
+               ),
                content=info,
-               source_file=self.source_url,
+               source_file=source_file,
                chunk_type="asyncapi_spec",
                token_count=token_count,
-               metadata={
-                   "source_url": self.source_url,
-                   "breadcrumb_path": "info",
-                   "logical_parent": "root",
-                   "neighbor_chunks": [],
-                   "original_format": "yaml",
-                   "schema_type": "asyncapi",
-                   "asyncapi_version": self.asyncapi_version,
-                   "asyncapi_element": "info"
-               }
+               metadata=metadata
            )
 
            self.chunks.append(chunk)
@@ -513,10 +537,12 @@ To add support for new YAML-based specifications (e.g., AsyncAPI, GraphQL schema
        ]
    ```
 
+   As with strategies, OpenCrane loads this file only when `.opencrane/config.yaml` sets `extensions: extensions.py`.
+
 3. **Add new chunk type to models**:
 
    Ensure your new chunk type is recognized:
-   - Add `"asyncapi_spec"` to chunk type validation if needed
+   - Add `"asyncapi_spec"` to the `chunk_type` `Literal` in `opencrane/shared/models/chunk.py`. Without it, creating the chunk fails validation.
    - Update documentation to list the new chunk type
    - Add appropriate metadata fields documentation
 

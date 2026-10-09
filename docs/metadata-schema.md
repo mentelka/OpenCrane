@@ -9,7 +9,13 @@ This document defines the metadata schema for all chunk types. Metadata fields e
 - **Usage**: Provide source attribution in RAG responses
 - **Example**: `"https://github.com/org/repo/blob/main/docs/config.md"` or a rendered docs-site page URL such as `"https://docs.example.com/config"`
 - **How it is set**: Resolved during chunking by joining the clean `llms-full.txt` content to the companion `llms.txt` index per source, validated by the page's H1 title. See [Chunking](chunking.md).
-- **Section anchors**: `source_url` is the page URL only. The in-page anchor is stored separately in `section_anchor`, so a direct section link is `{source_url}#{section_anchor}`. Anchors are on by default. To turn them off, set `section_anchor_style: none` in `.opencrane/config.yaml`. To change how slugs are built, override `section_anchor_for(self, heading)` on your `OpenCraneConfig` subclass in `.opencrane/extensions.py`.
+- **Section anchors**: `source_url` is the page URL only. The in-page anchor is stored separately in `section_anchor`, so a direct section link is `{source_url}#{section_anchor}`. Anchors are on by default. To turn them off, set `section_anchor_style: none` in `.opencrane/config.yaml`. To change how slugs are built, override `section_anchor_for(self, heading)` on your `OpenCraneConfig` subclass in `.opencrane/extensions.py`. OpenCrane loads that file only when `.opencrane/config.yaml` sets `extensions: extensions.py`, and the class must be named `Config`.
+
+### `section_anchor` (string, optional)
+- **Purpose**: In-page anchor slug of the section the chunk comes from
+- **Present when**: The chunk is a prose, list item, or table row chunk with a `source_url`, it sits under a heading of level 2 or deeper, and anchors are on. Structured YAML chunks have no anchor.
+- **Usage**: Build a direct section link as `{source_url}#{section_anchor}`
+- **Example**: `"prerequisites"`
 
 ### `original_format` (string, optional)
 - **Purpose**: Original serialization format of content
@@ -27,12 +33,16 @@ These fields enable tree traversal and context reconstruction:
 
 ### `breadcrumb_path` (string)
 - **Purpose**: Exact location in YAML/document tree structure
-- **Format**: Dot-separated path with array indices
+- **Format**:
+  - Prose chunks: `page title > section`, where the section is the first heading of level 2 or deeper in the chunk
+  - List item and table row chunks: the heading ancestry, joined by ` > `
+  - Structured YAML chunks (crd/openapi/json_schema): dot-separated path with array indices
 - **Usage**:
   - **Re-hydration**: Reconstruct complete YAML tree from chunks
   - **Location Display**: Show users where property exists in schema
   - **Precise Lookup**: Find exact position in nested structures
 - **Examples**:
+  - Prose: `"Setup Guide > Prerequisites"`
   - CRD: `"spec.versions[0].schema.openAPIV3Schema.properties.spec.properties.replicas"`
   - OpenAPI: `"paths./users/{id}.get"`
   - JSON Schema: `"properties.config.properties.database"`
@@ -48,7 +58,7 @@ These fields enable tree traversal and context reconstruction:
   - For `spec.replicas` → parent is `"spec.versions[0].schema.openAPIV3Schema.properties.spec.properties"`
   - For `paths./users.get` → parent is `"paths./users"`
 
-### `neighbor_chunks` (array of UUIDs)
+### `neighbor_chunks` (array of chunk IDs)
 - **Purpose**: Sibling chunks at same tree level
 - **Definition**: All chunks sharing the same `logical_parent`
 - **Format**: Array of `chunk_id` values
@@ -63,7 +73,7 @@ These fields enable tree traversal and context reconstruction:
 
 ### `crd_kind` (string)
 - **Purpose**: Kubernetes resource kind
-- **Example**: `"MyResource"`, `"Deployment"`, `"Service"`
+- **Example**: `"MyResource"`, `"Certificate"`
 - **Usage**: Filter by resource type
 
 ### `crd_api_version` (string)
@@ -119,6 +129,10 @@ These fields enable tree traversal and context reconstruction:
 - **Present in**: Schema component chunks
 - **Example**: `"User"`, `"Order"`, `"ErrorResponse"`
 
+### `security_scheme_name` (string, optional)
+- **Present in**: Security scheme component chunks
+- **Example**: `"ApiKeyAuth"`
+
 ### `property_name` (string, optional)
 - **Present in**: Recursively chunked schema property chunks
 - **Example**: `"email"`, `"profile"`, `"settings"`
@@ -168,6 +182,85 @@ These fields enable tree traversal and context reconstruction:
 - **Example**: `"address"`, `"phoneNumber"`
 - **Usage**: Reference schema definitions
 
+## List Item Metadata (`chunk_type: "list_item"`)
+
+A `list_item` chunk represents a single markdown bullet or numbered list item.
+Each item of a list is indexed as its own chunk so semantic search can match
+individual items precisely. Metadata links each item back to its list so the
+full list can be reconstructed when needed.
+
+### `breadcrumb_path` (string)
+- **Purpose**: Heading ancestry above the list, for context anchoring
+- **Format**: Heading titles joined by ` > `
+- **Example**: `"Migration guide > 1.6 -> 1.7"`
+- **Usage**: Already prefixed to the chunk's content as a `#` line so the
+  embedding captures domain context. Agents can display it as the "where in
+  the docs" locator.
+
+### `list_id` (string)
+- **Purpose**: Stable identifier grouping all items that belong to the same list
+- **Format**: Deterministic hash of `(breadcrumb_path, list_ordinal_within_section, depth, parent_item_id)`
+- **Usage**:
+  - Pass to `get_list_members(list_id=...)` to fetch all items of the list
+  - Detect when multiple search hits belong to the same list (MCP does this
+    automatically and groups them)
+- **Note**: Nested lists have a different `list_id` from their parent list.
+  Siblings share a `list_id`; a parent and its children do NOT.
+
+### `list_style` (string, enum)
+- **Values**: `"ordered"` (numbered: `1.`, `2.`), `"unordered"` (bulleted: `-`, `*`, `+`)
+- **Usage**: Hint to the agent about the list's nature. Ordered lists are
+  typically procedures (sequence matters); unordered lists are typically
+  enumerations (order less important).
+
+### `position` (integer, 1-indexed)
+- **Purpose**: Position of this item within its list
+- **Example**: `1` for the first item
+- **Usage**: Reconstruct the list in order; render "item N of M" displays.
+
+### `total_siblings` (integer)
+- **Purpose**: Total number of items in this list (including self)
+- **Example**: `5` means the list has 5 items; this item is one of them
+- **Usage**: Show "item 3 of 5" context; decide whether to fetch the full list.
+
+### `sibling_ids` (array of chunk_id strings)
+- **Purpose**: chunk_ids of every OTHER item in the same list, in list order
+- **Length**: Always `total_siblings - 1` (self excluded)
+- **Usage**: Follow these to fetch specific sibling chunks. To fetch all items,
+  use `get_list_members(list_id=...)` instead. It takes one call.
+
+### `sibling_previews` (array of strings)
+- **Purpose**: Short text previews of each sibling, same order as `sibling_ids`
+- **Format**: Preview line capped at 30 display characters; ordered items
+  include their `N.` prefix. `…` appended when the body is truncated;
+  ` …` appended when the body fits but the item has additional paragraphs /
+  code beyond the first line.
+- **Cap**: 15 previews maximum, plus an overflow entry
+  - If 15 or fewer siblings: one preview per sibling (length matches `sibling_ids`)
+  - If more than 15 siblings: first 15 previews + a 16th entry literally
+    `"... +N more"` where N is the overflow count
+- **Usage**: Give the agent a short summary of the rest of the list so it can
+  decide whether the other items matter without a follow-up tool call.
+
+### `parent_item_id` (chunk_id string, or null)
+- **Purpose**: For nested items, the chunk_id of the enclosing bullet
+- **Values**: `null` at top level (depth 0); a real chunk_id for nested items
+- **Usage**: Walk up from a sub-bullet to its parent bullet. The parent's
+  `list_id` is different from this item's `list_id`: the parent belongs to the
+  outer list, and this item belongs to an inner list grouped by shared parent.
+
+### `depth` (integer)
+- **Purpose**: Nesting level of this item
+- **Values**: `0` for top-level items; `1` for first-nested; and so on.
+- **Usage**: Render indented displays; filter by level.
+
+### When Multiple List Items Match One Query
+
+When top-K search results contain two or more items sharing the same `list_id`,
+the MCP `search_docs` tool groups them into a single result slot with all
+matched items inline. Unmatched items appear as `sibling_previews` in the
+grouped output. The agent does not need to do anything.
+
 ## Table Row Metadata (`chunk_type: "table_row"`)
 
 A `table_row` chunk represents a single data row of a markdown table. Each row
@@ -213,11 +306,11 @@ reconstructed when needed.
 
 ### `sibling_previews` (array of strings)
 
-- **Purpose**: Short text previews of other rows in the same table, in row order
+- **Purpose**: Short text previews of other rows in the same table, in row order. Each preview is the row's first-column value (`row_key`).
 - **Format**: Preview capped at 30 display characters; `…` appended when
   truncated
-- **Cap**: 15 entries maximum
-  - If fewer than 15 siblings: one preview per sibling (length matches `sibling_ids`)
+- **Cap**: 15 previews maximum, plus an overflow entry
+  - If 15 or fewer siblings: one preview per sibling (length matches `sibling_ids`)
   - If more than 15 siblings: first 15 previews + a 16th entry literally
     `"... +N more"` where N is the overflow count
 - **Usage**: Give the agent an at-a-glance summary of other rows so it can
@@ -254,6 +347,9 @@ slots. Use `get_table_members(table_id=...)` to retrieve the full table.
 
 ### Context Expansion (Python)
 ```python
+from typing import Dict, List, Optional
+from opencrane.shared.models.chunk import Chunk
+
 def expand_with_neighbors(chunk: Chunk, chunk_db: Dict[str, Chunk]) -> List[Chunk]:
     """Fetch neighbor chunks for additional context."""
     neighbor_ids = chunk.metadata["neighbor_chunks"]
@@ -275,6 +371,12 @@ def get_parent_context(chunk: Chunk, chunk_db: Dict[str, Chunk]) -> Optional[Chu
 
 ### Re-hydration (Python)
 ```python
+def set_nested_value(target: dict, keys: List[str], value) -> None:
+    """Set value at the nested key path, creating dictionaries on the way."""
+    for key in keys[:-1]:
+        target = target.setdefault(key, {})
+    target[keys[-1]] = value
+
 def reconstruct_yaml(chunks: List[Chunk]) -> dict:
     """Reconstruct YAML tree from chunks using breadcrumb paths."""
     result = {}
@@ -290,7 +392,7 @@ The MCP server uses these metadata fields programmatically:
 
 1. **Search Tool**: Returns chunks with metadata for LLM to understand context
 2. **YAML Definition Tool**: Uses `breadcrumb_path` to add location comments
-3. **Context Expansion**: Automatically fetches `neighbor_chunks` when relevant
+3. **Context Expansion**: `get_yaml_definition` lists up to five `neighbor_chunks` IDs, so the agent can fetch them
 4. **Hierarchical Display**: Uses `logical_parent` to show tree structure
 
 The LLM receives **enriched results** from the MCP server, not raw chunks, so it doesn't need to interpret metadata directly.

@@ -91,9 +91,9 @@ add → fetch → llms → chunk → embed → index → serve
 ./pytest.sh tests/integration/           # Integration tests (needs Milvus Lite)
 ```
 
-- **100% code coverage is enforced** — `--cov-fail-under=100` in pytest.ini
+- **100% code coverage is enforced** — `./pytest.sh --check-coverage` fails below 100%
 - Test markers: `@pytest.mark.unit`, `@pytest.mark.integration`
-- `pytest.ini` deselects integration tests, and `./pytest.sh` selects them again, so `./pytest.sh` with no arguments runs both
+- `./pytest.sh` with no arguments runs both unit and integration tests
 
 ### Test Policy
 
@@ -127,7 +127,7 @@ Subclass `OpenCraneConfig` in `.opencrane/extensions.py` to customize:
 4. **`section_anchor_for`**: builds the in-page anchor slug recorded on each chunk
 5. **`middleware`, `token_verifier`, `auth_provider`**: authentication and authorization hooks for the HTTP transport, see `docs/auth.md`
 
-Config is auto-discovered from `.opencrane/extensions.py:Config` or set via `--config` / `OPENCRANE_CONFIG` env var.
+Config is auto-discovered from the file that the `extensions` key in `.opencrane/config.yaml` names, for example `extensions: extensions.py`. The class in that file must be named `Config`. The `opencrane init` template ships the key commented out. Config can also be set via `--config` / `OPENCRANE_CONFIG` env var.
 
 ## Key Design Decisions
 

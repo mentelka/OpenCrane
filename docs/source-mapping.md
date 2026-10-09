@@ -29,8 +29,11 @@ sources:
 Field Descriptions:
 
 - Key (for example `my-project`): The source name. OpenCrane stores a fetched source in `.opencrane/sources/{KEY}`. For a local source, the key is the directory path relative to the workspace root
-- url: Source repository URL for attribution and fetching
-- docs_path: Path within the source repository where docs are located (empty string means root)
+- url: Source repository URL for attribution and fetching. For a `type: llmstxt` source, the URL or local path of the `llms-full.txt` file
+- type: `github` (the default) or `llmstxt`. An `llmstxt` source is an existing `llms-full.txt` bundle. The fetch writes it to `.opencrane/llmstxt/{KEY}/llms-full.txt`, and stale cleanup never removes it
+- docs_url: Base URL of the published documentation site. When set, OpenCrane builds page URLs from it instead of from `url`
+- docs_path: Path within the source repository where docs are located (empty string means root). If you leave it out, the fetch uses `docs`
+- sha, tag, release, branch: Pin the fetch to one commit, tag, release, or branch. The fetch reads these fields only on entries with `manual: true`
 - manual: `false` = entry auto-generated and updated during fetch, `true` = manually added and maintained mapping
 - local: When `true`, the path key points to a local directory in the workspace — no fetching occurs and the pipeline reads directly from this path
 
@@ -49,11 +52,11 @@ When documentation is fetched, the mapping file is automatically updated:
 2. For each repository, adds or updates an entry in the source mapping file
    - Sets `manual: false` for auto-discovered sources
    - Preserves `manual: true` entries (won't overwrite)
-3. **Removes stale entries** - Repositories that lose the discovery topic are automatically cleaned up:
+3. **Removes stale entries** - The fetch cleans up each auto-generated entry (`manual: false`) whose repository lost the discovery topic:
    - Removes entry from the source mapping file (only if `manual: false`)
    - Deletes local source directory (e.g., `.opencrane/sources/repo-name/`)
    - Deletes generated output directory (e.g., `.opencrane/llmstxt/repo-name/`)
-   - Manual entries (`manual: true`) are never removed automatically
+   - The fetch never removes manual entries (`manual: true`), local entries (`local: true`), or `llmstxt` entries, and keeps their directories
 
 This ensures the mapping always reflects the current state of available documentation sources and prevents stale entries from accumulating.
 
@@ -117,7 +120,7 @@ The `url` and `docs_url` fields are used to construct per-page source URLs. Thes
 
 **`url` (GitHub) URL construction:**
 1. Take `url`: `https://github.com/my-org/my-project`
-2. Add Git ref: `/blob/main`
+2. Add `/blob/main`. OpenCrane always links to the `main` branch, even when the fetch used a release or a pinned ref
 3. Add `docs_path` if present: `/docs`
 4. Add file's relative path from mapped directory: `/guides/setup.md`
 5. Result: `https://github.com/my-org/my-project/blob/main/docs/guides/setup.md`
@@ -165,7 +168,7 @@ For a pre-existing external `llmstxt` bundle, `docs_url` plays a different role 
 - Documentation that already exists in the workspace (e.g., content in the same repo)
 - No fetching occurs — the pipeline reads directly from the local path
 - The path key is the local directory path relative to workspace root
-- `url` is optional (informational only, for reference)
+- `url` is optional. If you set it, OpenCrane uses it to build the GitHub page URLs for the local files
 - Never removed by stale cleanup
 - Examples: Content guidelines, writing standards, templates that live alongside the OpenCrane project
 

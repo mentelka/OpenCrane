@@ -1,6 +1,6 @@
 # Authoring Markdown for OpenCrane Chunking
 
-This guide describes how to structure markdown documentation so OpenCrane produces high-quality, retrievable chunks. It applies to `.md` and `.mdx` source files authored for a docs site (Docusaurus, Nextra, plain markdown repos). It does **not** cover hand-authored `llms-full.txt` files.
+This guide describes how to structure markdown documentation so OpenCrane produces high-quality, retrievable chunks. It applies to `.md` source files authored for a docs site (Docusaurus, Nextra, plain markdown repos). It does **not** cover hand-authored `llms-full.txt` files.
 
 ## How Chunking Sees Your Markdown
 
@@ -94,7 +94,7 @@ Headings are the primary chunk boundary. Get them right and most chunking proble
   Set `log_level` to `debug`, `info`, or `warn` to control log verbosity.
   ````
 
-- **Lead every page with an `#` title.** It anchors the first chunk and provides breadcrumb context for any lists below.
+- **Lead every page with an `#` title.** It anchors the first chunk and starts the breadcrumb of every prose chunk on the page.
 
   Good:
 
@@ -105,9 +105,7 @@ Headings are the primary chunk boundary. Get them right and most chunking proble
   ...
   ````
 
-  Avoid (no `#` — the `## Running a migration` chunk has no page-level context,
-  so a retrieval result shows "Running a migration" with no indication this is
-  about database migrations versus, say, data migrations or network migrations):
+  Avoid (no `#` title, so OpenCrane uses the first heading, "Running a migration", as the page title. A retrieval result gives no indication that this is about database migrations rather than data migrations or network migrations):
 
   ````md
   ## Running a migration
@@ -197,7 +195,7 @@ Headings are the primary chunk boundary. Get them right and most chunking proble
 
   Avoid: "Run the main command to execute it all."
 
-- **Don't open a section with a URL heading** like `## https://example.com/page Title`. The pipeline no longer injects URLs into headings, so a URL in your heading is kept verbatim as heading text — which makes for a noisy chunk title and, if it lands on a page's leading `#`, a noisy page title in the `llms.txt` index. Keep headings human-readable.
+- **Don't open a section with a URL heading** like `## https://example.com/page Title`. The chunk step strips the URL from a section heading, but the `llms` step does not. If the URL is in the leading `#` heading of a page with no front matter `title`, the URL becomes part of the page title in the `llms.txt` index. Keep headings human-readable.
 
   Avoid:
 
@@ -213,9 +211,9 @@ Headings are the primary chunk boundary. Get them right and most chunking proble
 
 ## Lists
 
-Every top-level list item becomes its own chunk, each carrying a `breadcrumb_path` built from the nearest heading ancestry.
+Every list item, including each nested item, becomes its own chunk, each carrying a `breadcrumb_path` built from the nearest heading ancestry.
 
-- **Every list must appear within a section that has a heading (`#`/`##`/`###`).** The breadcrumb attached to each list-item chunk is built from all headings seen before the list in the document — not just the immediately preceding line. Prose between the heading and the list is fine. What breaks breadcrumb context is a list that appears before any heading has been encountered, typically at the very top of a file.
+- **Every list must appear within a section that has a heading (`##`/`###`).** The breadcrumb attached to each list-item chunk is built from the headings above the list, starting at the page title. Prose between the heading and the list is fine. A list that appears before the first `##` heading, typically at the very top of a file, gets only the page title as its breadcrumb. A code block earlier on the page shortens the breadcrumb: for a list after a code block, the breadcrumb holds only the headings between that code block and the list.
 
   Good:
 
@@ -227,7 +225,7 @@ Every top-level list item becomes its own chunk, each carrying a `breadcrumb_pat
   - `sentence-transformers/all-MiniLM-L6-v2` — legacy
   ````
 
-  Avoid (no heading above — items chunk without breadcrumb):
+  Avoid (no section heading above, so the items carry only the page title as their breadcrumb):
 
   ````md
   OpenCrane supports these models:
@@ -315,9 +313,9 @@ Every top-level list item becomes its own chunk, each carrying a `breadcrumb_pat
   3. Run `opencrane build`.
   ````
 
-- **Code blocks inside list items are included verbatim in the item's chunk — they do not become separate code chunks.** The list chunker tracks fences to avoid treating code content as list markers, and renders each item's full body including any code blocks it contains.
+- **Code blocks inside list items become separate chunks.** OpenCrane splits each page at every fenced code block before the list chunker runs. A code block inside a list item becomes its own `code_snippet` chunk, and that chunk has no heading breadcrumb. The list items after the code block lose their breadcrumb, because the breadcrumb holds only the headings between the most recent code block and the list.
 
-  This example produces **2 chunks** — one per top-level item. Each chunk contains the prose description and the code block together:
+  This example produces **4 chunks**:
 
   ````md
   1. Install the CLI:
@@ -330,11 +328,32 @@ Every top-level list item becomes its own chunk, each carrying a `breadcrumb_pat
      ```
   ````
 
-  Chunk 1 content: `1. Install the CLI:` + the bash block.
-  Chunk 2 content: `2. Initialise the project:` + the bash block.
-  Each chunk also carries a sibling preview of the other item.
+  Chunk 1 content: `1. Install the CLI:`, with the breadcrumb of its section.
+  Chunk 2 content: the `pip install opencrane` block.
+  Chunk 3 content: `2. Initialise the project:`, with an empty breadcrumb.
+  Chunk 4 content: the `opencrane init` block.
 
-  The one edge case: if a list section has so many code blocks that more than half its lines are code, the code chunker claims the whole section first and it is no longer chunked as a list. For typical step-by-step docs the prose lines (markers, descriptions) easily outweigh the code lines, so this rarely applies.
+  Put each step that needs a code block under its own heading instead, and introduce the code block with a sentence. The prose chunk of each step then carries the page title and the step heading in its breadcrumb:
+
+  ````md
+  ## Install the CLI
+
+  Run the following command to install the CLI:
+
+  ```bash
+  pip install opencrane
+  ```
+
+  ## Initialize the project
+
+  Run the following command to initialize the project:
+
+  ```bash
+  opencrane init
+  ```
+  ````
+
+  If a list follows a code block, put a heading between them. The list items then carry that heading as their breadcrumb.
 
 ## Tables
 
@@ -467,7 +486,7 @@ Every data row of a markdown table becomes its own chunk, rendered as natural-la
   ```
   ````
 
-- **Prose-heavy pages stay prose.** The code chunker only claims a node if more than half its lines are code (or the node is under ~50 lines). In ordinary markdown docs each fenced block is its own node, so this is rarely an issue — just don't write one giant document that is mostly code fences with occasional paragraphs if you want the prose chunks to survive.
+- **Prose-heavy pages stay prose.** The code chunker only claims a node if more than half its lines are code (or the node is under 50 lines). In ordinary markdown docs each fenced block is its own node, so this is rarely an issue — just don't write one giant document that is mostly code fences with occasional paragraphs if you want the prose chunks to survive.
 
 ## Embedded Specs (CRD / OpenAPI / JSON Schema)
 
@@ -576,7 +595,7 @@ Fenced YAML blocks are inspected by the chunker. If the YAML parses to a known s
 
 ## YAML Front Matter
 
-- **Front matter is ignored by chunking**, but its `title` is used for the page title. Flat `key: value` blocks at the top of a file with only scalar values are detected as front matter and skipped from chunk content. When a `title` field is present, it becomes the page title used in the `llms.txt` index and normalized onto the page's leading `#` heading — taking precedence over the first body heading and the filename. See [Generating bundles](llms-generation.md#page-titles).
+- **Front matter is ignored by chunking**, but its `title` is used for the page title. The `llms` step strips a `---`-delimited YAML block at the top of a file before the content reaches chunking. When a `title` field is present, it becomes the page title used in the `llms.txt` index and the leading `#` heading of the page in `llms-full.txt`. It takes precedence over the first body heading and the filename. See [Generating bundles](llms-generation.md#page-titles).
 
   Skipped as front matter (its `title` becomes the page title):
 
@@ -617,28 +636,20 @@ Fenced YAML blocks are inspected by the chunker. If the YAML parses to a known s
   them via MCP.
   ````
 
-- **Front matter with nested values is NOT skipped.** If your front matter contains lists or maps, it will be chunked as YAML. Keep it flat-scalar or move complex metadata to a dedicated file.
+- **Front matter must be valid YAML.** The `llms` step strips any front matter that parses as a YAML mapping, including lists and nested maps. If the block is not valid YAML, OpenCrane keeps the whole block in the page body, and it ends up in the chunks.
 
-  Chunked as YAML (not skipped):
+  Kept in the body, because the unquoted colon in the `title` value is not valid YAML:
 
   ````md
   ---
-  title: My Page
-  tags:
-    - rag
-    - mcp
-  authors:
-    - name: Lukasz
-      role: maintainer
+  title: Setup: the first run
   ---
   ````
 
-  Front-matter-safe flat equivalent:
+  Stripped as front matter, because the quoted value is valid YAML:
 
   ````md
   ---
-  title: My Page
-  tags: "rag, mcp"
-  author: Lukasz
+  title: "Setup: the first run"
   ---
   ````

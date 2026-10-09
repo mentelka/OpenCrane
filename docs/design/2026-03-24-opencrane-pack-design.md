@@ -241,5 +241,5 @@ The `.opencrane/pack/` directory contains large binary files and build artifacts
 - **Name collisions on PyPI**: Not handled — user's responsibility to pick a unique name
 - **Large data files**: `milvus.db` can be tens/hundreds of MB. PyPI has a 100MB per-file limit. For large databases, GitHub or direct distribution is recommended. The README documents this.
 - **Missing metadata-schema.md**: Skipped gracefully — the MCP server handles this case already
-- **opencrane version drift**: The generated `pyproject.toml` pins `opencrane>={current_version}`. If the MCP server protocol changes in a future opencrane release, the pack may need to be regenerated.
+- **opencrane version drift**: The generated `pyproject.toml` sets a minimum version with `opencrane>={opencrane_version}`. If the MCP server protocol changes in a future opencrane release, the pack may need to be regenerated.
 - **uvx caching on re-pack**: If a user re-packs with updated docs but the same version number, `uvx` will serve the cached old version. The `--version` flag and the generated README both call this out.

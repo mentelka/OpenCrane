@@ -34,16 +34,19 @@ The `opencrane add` command registers documentation sources in `.opencrane/confi
 
 ### Fetch
 
-The `opencrane fetch` command clones registered GitHub repositories into `.opencrane/sources/`. It supports two discovery modes:
+The `opencrane fetch` command downloads the documentation files of registered GitHub repositories into `.opencrane/sources/`. It supports two discovery modes:
 
-- **Auto-discovery:** Finds all repositories in a GitHub organization that carry the `documentation` topic.
+- **Auto-discovery:** Finds all repositories in a GitHub organization that carry the discovery topic. The topic is `documentation` by default, and the `DOCS_TOPIC` environment variable changes it.
 - **Manual:** Uses the list of repositories you defined in `.opencrane/config.yaml`.
 
-The command fetches repositories concurrently. It auto-removes stale sources (repositories that lost the `documentation` topic) unless you mark the source `manual: true` in the configuration. Sources marked `local: true` are never fetched — OpenCrane uses them as-is from the local file system.
+> [!CAUTION]
+> When a repository loses the discovery topic, `opencrane fetch` deletes its source directory and its generated `llmstxt/` output. To keep the source, set `manual: true` on its entry before you run the fetch.
+
+The command fetches repositories concurrently. It auto-removes stale sources (repositories that lost the discovery topic) unless you mark the source `manual: true` in the configuration. Sources marked `local: true` are never fetched — OpenCrane uses them as-is from the local file system.
 
 ### Generate `llms-full.txt` bundles
 
-The `opencrane llms` command flattens the cloned Markdown files into a hierarchy of `llms-full.txt` bundles under `.opencrane/llmstxt/`: a top-level combined bundle, plus per-source, per-project, and per-subproject bundles. For each bundle it:
+The `opencrane llms` command flattens the fetched Markdown files into a hierarchy of `llms-full.txt` bundles under `.opencrane/llmstxt/`: a top-level combined bundle, a bundle for each source, and a bundle for each path in the source mapping file. When the source mapping file lists no sources, it writes a bundle for each project directory and each subproject directory instead. For each bundle it:
 
 - Processes Markdown files recursively.
 - Emits **clean** content — no URLs are injected into headings.
@@ -76,8 +79,8 @@ Because `list_id` and `table_id` are dedicated columns, a collection built by an
 
 Two deployment modes are available:
 
-- **Milvus Lite:** An embedded, file-based database stored at `.opencrane/milvus.db`. No separate service is needed. Set `MILVUS_DB_PATH` to use this mode.
-- **Milvus Server:** A separate Milvus instance. Set `MILVUS_HOST` and `MILVUS_PORT` to connect.
+- **Milvus Lite:** An embedded, file-based database stored at `.opencrane/milvus.db`. No separate service is needed. This is the default mode. To store the file somewhere else, set `MILVUS_DB_PATH`.
+- **Milvus Server:** A separate Milvus instance. To connect, set `MILVUS_DB_PATH` to an empty value, and set `MILVUS_HOST` and `MILVUS_PORT`.
 
 ### Serve
 
@@ -119,10 +122,10 @@ All subcommands share the same configuration resolution order:
 
 1. Explicit `--config` flag.
 2. `OPENCRANE_CONFIG` environment variable.
-3. Auto-discovery from `.opencrane/extensions.py` in the working directory.
+3. The file that the `extensions` key in `.opencrane/config.yaml` names, relative to `.opencrane/`.
 4. Base `OpenCraneConfig` defaults.
 
-The CLI auto-discovers a custom `OpenCraneConfig` subclass from `.opencrane/extensions.py:Config`. This is the primary extension mechanism — subclassing `OpenCraneConfig` lets you override fence types, chunking strategies, and YAML tree walkers without modifying OpenCrane's core.
+When `.opencrane/config.yaml` has an `extensions` key, for example `extensions: extensions.py`, the CLI loads the `OpenCraneConfig` subclass named `Config` from that file. The `opencrane init` template ships this key commented out. This is the primary extension mechanism — subclassing `OpenCraneConfig` lets you override fence types, chunking strategies, and YAML tree walkers without modifying OpenCrane's core.
 
 ### RAG pipeline (`opencrane/rag/`)
 
@@ -144,7 +147,7 @@ Tree walkers live in `opencrane/rag/services/chunking_strategies/` and handle st
 
 ### MCP server (`opencrane/mcp/`)
 
-With the stdio transport, the server starts its backing services on the first tool call, so startup is fast. The HTTP transport starts them when the server starts. It holds **no in-memory copy of the corpus** — every tool reads from the vector database:
+With the stdio transport, the server starts its backing services on the first tool call, so startup is fast. The HTTP transport starts them when the server starts. These tools read from the vector database and do not keep an in-memory copy of the chunks:
 
 - `get_yaml_definition` fetches a single chunk by its primary key.
 - `get_list_members` and `get_table_members` query the indexed `list_id` / `table_id` columns (constrained to the relevant `chunk_type`) for a list's or table's members.
@@ -153,7 +156,7 @@ With the stdio transport, the server starts its backing services on the first to
 On the first request for the tool list, the server asks Milvus which `chunk_type` values the collection contains, and caches the answer for the life of the process. The query reads only the `chunk_type` field through `query_iterator`, not the chunk content. The tool list then matches the indexed content without a separate file that could get out of sync with the database. The two backing services are:
 
 - **`opencrane/mcp/services/milvus_client.py`** — Manages the connection to Milvus and runs the vector searches.
-- **`opencrane/mcp/services/keyword_search.py`** — Builds a Best Match 25 (BM25) index lazily from `chunks.json` on the first keyword or hybrid query.
+- **`opencrane/mcp/services/keyword_search.py`** — Builds a Best Matching 25 (BM25) index lazily from `chunks.json` on the first keyword or hybrid query. This index holds the chunks in memory, so the server needs `chunks.json` for keyword and hybrid search.
 
 ### Configuration (`opencrane/config.py`, `opencrane/shared/config.py`)
 
@@ -167,7 +170,7 @@ On the first request for the tool list, the server asks Milvus which `chunk_type
 
 ## Extension points
 
-You extend OpenCrane by subclassing `OpenCraneConfig` in `.opencrane/extensions.py`. OpenCrane auto-discovers this file. This section covers the extension points of the pipeline. For the authentication hooks, see [Authentication & Authorization](auth.md).
+You extend OpenCrane with a subclass of `OpenCraneConfig` named `Config` in `.opencrane/extensions.py`. To load the file, set `extensions: extensions.py` in `.opencrane/config.yaml`. This section covers the extension points of the pipeline. For the authentication hooks, see [Authentication & Authorization](auth.md).
 
 ### Custom fence types
 
