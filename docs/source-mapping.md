@@ -39,12 +39,12 @@ Field Descriptions:
 
 ## Configuring the Source Mapping File Path
 
-Set the `MAPPING_FILE` environment variable to use a different file. The default is `.opencrane/config.yaml`. The CLI still reads the `extensions` key from `.opencrane/config.yaml`, and `opencrane add` still writes new sources there.
+Set the `MAPPING_FILE` environment variable to use a different file. The default is `.opencrane/config.yaml`. The CLI still reads the `extensions` and `section_anchor_style` keys from `.opencrane/config.yaml`, and `opencrane add` still writes new sources there.
 
 ## Automatic Updates During Fetching
 
 > [!CAUTION]
-> When a repository loses the discovery topic, `opencrane fetch` removes its entry from the source mapping file. It also deletes its local source directory and its generated `llmstxt/` output. To keep a source that does not carry the topic, set `manual: true` on its entry.
+> When auto-discovery no longer returns its repository (it lost the discovery topic, its topics could not be read, or the token cannot see it), `opencrane fetch` removes its entry from the source mapping file. It also deletes its local source directory and its generated `llmstxt/` output. To keep a source that does not carry the topic, set `manual: true` on its entry.
 
 When documentation is fetched, the mapping file is automatically updated:
 
@@ -52,7 +52,7 @@ When documentation is fetched, the mapping file is automatically updated:
 2. For each repository, adds or updates an entry in the source mapping file
    - Sets `manual: false` for auto-discovered sources
    - Preserves `manual: true` entries (won't overwrite)
-3. **Removes stale entries** - The fetch cleans up each auto-generated entry (`manual: false`) whose repository lost the discovery topic:
+3. **Removes stale entries** - The fetch cleans up each auto-generated entry (`manual: false`) that auto-discovery no longer returns:
    - Removes entry from the source mapping file (only if `manual: false`)
    - Deletes local source directory (e.g., `.opencrane/sources/repo-name/`)
    - Deletes generated output directory (e.g., `.opencrane/llmstxt/repo-name/`)

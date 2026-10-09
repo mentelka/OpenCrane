@@ -9,6 +9,9 @@ opencrane llms --config yourproject.config:YourConfig  # Default: processes conf
 opencrane llms --config yourproject.config:YourConfig --sources-dir .opencrane/sources/my-project --sources-dir docs
 ```
 
+> [!CAUTION]
+> A run with `--sources-dir` rebuilds the combined `llms-full.txt` and its `llms.txt` index from only the directories you pass. Sources outside them lose their page URLs, so their chunks get no `source_url`. Run `opencrane llms` without `--sources-dir` before you run `opencrane chunk`.
+
 ## Output Control via Source Mapping Config
 
 The source mapping file, `.opencrane/config.yaml` by default, controls which directories get `llms-full.txt` files generated. This provides fine-grained control over the output structure and prevents unwanted file generation.
@@ -17,7 +20,7 @@ The source mapping file, `.opencrane/config.yaml` by default, controls which dir
 - Only paths explicitly listed in the source mapping under the `sources:` key get `llms-full.txt` files generated
 - Each generated file includes ALL markdown from that directory and subdirectories recursively, except directories listed in `ignore_patterns`
 - No automatic subdirectory file generation - one file per mapped path
-- **Automatically maintained** during documentation fetch - adds new repos and removes stale ones (only auto-discovered entries whose repository lost the discovery topic; `manual`, `local`, and `llmstxt` entries are never removed)
+- **Automatically maintained** during documentation fetch - adds new repos and removes stale ones (only auto-discovered entries that auto-discovery no longer returns; `manual`, `local`, and `llmstxt` entries are never removed)
 
 **Example:**
 
@@ -60,7 +63,7 @@ Within `llms-full.txt`, boundaries are marked structurally:
 1. `<!-- opencrane:page -->` — separates the individual files (pages) that make up one source. This is a collision-proof HTML-comment sentinel (invisible when rendered) rather than a dash rule, because a markdown thematic break (`---`, `-----`) in page content would be indistinguishable from a dash-based separator and silently split the page.
 2. `======` — separates one source's block from the next in the combined bundle
 
-Each page begins with a `# {title}` H1 heading (see [Page titles](#page-titles)). Each image reference is replaced with an `[Image removed: {alt text}]` note. Each relative link is replaced with its link text, and an absolute-path link becomes `{label} (link removed: {path})`. External links stay as they are.
+Each page begins with a `# {title}` H1 heading (see [Page titles](#page-titles)). Each image reference is replaced with an `[Image removed: {alt text}]` note. Each relative link to a Markdown file or an anchor is replaced with its link text, and an absolute-path link becomes `{label} (link removed: {path})`. External links stay as they are.
 
 Example structure of the combined `llms-full.txt`:
 ```markdown
@@ -112,7 +115,7 @@ This positional, per-source alignment is what lets the `chunk` step recover each
 
 Each page's title is chosen with this precedence:
 
-1. **Frontmatter `title`** — its `title` field, when present and non-empty, is used. YAML frontmatter is always stripped from the emitted content, whether or not it has a `title`.
+1. **Frontmatter `title`** — its `title` field, when present and non-empty, is used. YAML frontmatter that parses as a mapping is stripped from the emitted content, whether or not it has a `title`.
 2. **First heading** — the first Markdown heading of any level in the body.
 3. **Filename** — derived from the file stem (e.g. `getting-started.md` → "Getting Started").
 

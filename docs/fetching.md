@@ -12,7 +12,7 @@ A typical `update-docs.yml` workflow fetches documentation from one or more orga
 **Auto-discovery configuration**: The `AUTO_DISCOVERY_ORGS` environment variable controls which organizations have auto-discovery turned on. It takes a comma-separated list, for example `AUTO_DISCOVERY_ORGS=my-org,other-org`, and is empty by default. The `--org` flag also turns on auto-discovery for the organization it names. Each fetch discovers repositories in one organization only: the one that `--org` or the `ORG_NAME` environment variable names. Auto-discovery runs only if that organization is in `AUTO_DISCOVERY_ORGS`.
 
 > [!CAUTION]
-> If `ORG_NAME` names an organization that is not in `AUTO_DISCOVERY_ORGS` and you do not pass `--org`, the fetch discovers no repositories in it. It then deletes the local source directory and the `llmstxt/` output of every auto-discovered entry from that organization, and removes the entries from the source mapping config. Pass `--org`, or add the organization to `AUTO_DISCOVERY_ORGS`.
+> If `ORG_NAME` names an organization that is not in `AUTO_DISCOVERY_ORGS` and you do not pass `--org`, the fetch discovers no repositories in it. It then deletes the local source directory and the `llmstxt/` output of every auto-discovered entry from that organization, and removes the entries from the source mapping config. `opencrane build` never passes `--org`, so it always takes this path. Pass `--org`, or add the organization to `AUTO_DISCOVERY_ORGS`.
 
 The workflow makes sure that your project always operates on the latest docs.
 

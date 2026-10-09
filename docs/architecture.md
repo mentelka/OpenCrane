@@ -40,7 +40,7 @@ The `opencrane fetch` command downloads the documentation files of registered Gi
 - **Manual:** Uses the list of repositories you defined in `.opencrane/config.yaml`.
 
 > [!CAUTION]
-> When a repository loses the discovery topic, `opencrane fetch` removes its entry from the source mapping file. It also deletes its source directory and its generated `llmstxt/` output. To keep the source, set `manual: true` on its entry before you run the fetch.
+> When auto-discovery no longer returns its repository (it lost the discovery topic, its topics could not be read, or the token cannot see it), `opencrane fetch` removes its entry from the source mapping file. It also deletes its source directory and its generated `llmstxt/` output. To keep the source, set `manual: true` on its entry before you run the fetch.
 
 The command fetches repositories concurrently. It auto-removes stale sources (repositories that lost the discovery topic) unless you mark the source `manual: true` in the configuration. Sources marked `local: true` are never fetched — OpenCrane uses them as-is from the local file system.
 
@@ -53,11 +53,11 @@ The `opencrane llms` command flattens the fetched Markdown files into a hierarch
 - Adds separators (a `<!-- opencrane:page -->` sentinel between files within a source, `======` between sources) and adds a `# {title}` heading at the start of each page, unless the page already starts with exactly that heading (title precedence: frontmatter `title` → first heading → filename). An existing H1 with different text stays under the new heading, so the page then has two H1 headings. The page separator is a collision-proof HTML comment so markdown thematic breaks (`---`) in content are not mistaken for page boundaries.
 - Rewrites relative links to work in the flattened output.
 - Invokes fence type handlers for structured content such as OpenAPI specs and Kubernetes CRDs embedded as fenced code blocks.
-- Writes a companion `llms.txt` index next to each `llms-full.txt`: a `# {project}` H1 with one `## {source}` section per source and a `- [title](page_url)` link per page, in the same order as the bundle. This index is how the `chunk` step recovers each chunk's specific page `source_url`. For external `llmstxt` sources, a fetched companion `llms.txt` (real per-page URLs) is merged, or an index is synthesized from the source's `docs_url` when no companion exists.
+- Writes a companion `llms.txt` index next to the combined `llms-full.txt`: a `# {project}` H1 with one `## {source}` section per source and a `- [title](page_url)` link per page, in the same order as the bundle. This index is how the `chunk` step recovers each chunk's specific page `source_url`. For external `llmstxt` sources, a fetched companion `llms.txt` (real per-page URLs) is merged, or an index is synthesized from the source's `docs_url` when no companion exists.
 
 ### Chunk
 
-The `opencrane chunk` command splits each `llms-full.txt` bundle into typed semantic chunks and writes them to `.opencrane/chunks.json`. It reads the companion `llms.txt` index alongside the bundle and assigns each chunk its specific page `source_url` by joining the clean content to the index positionally per source, validated by the page's H1 title (falling back to the legacy inline-marker path when no companion index is present). Chunking strategies run in priority order — the first strategy that matches a document fragment handles it:
+The `opencrane chunk` command splits the combined `.opencrane/llmstxt/llms-full.txt` bundle into typed semantic chunks and writes them to `.opencrane/chunks.json`. It reads the companion `llms.txt` index alongside the bundle and assigns each chunk its specific page `source_url` by joining the clean content to the index positionally per source, validated by the page's H1 title (falling back to the legacy inline-marker path when no companion index is present). Chunking strategies run in priority order — the first strategy that matches a document fragment handles it:
 
 1. **YAML strategy:** Handles YAML content. Delegates structured specs (CRDs, OpenAPI, JSON Schema) to tree walkers. Falls back to a generic `yaml_content` chunk for unrecognized YAML.
 2. **Code strategy:** Handles fenced code blocks. Detects the language and, for structured YAML specs embedded in code fences, invokes tree walkers.

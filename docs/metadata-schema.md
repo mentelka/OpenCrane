@@ -390,7 +390,7 @@ def reconstruct_yaml(chunks: List[Chunk]) -> dict:
     return result
 ```
 
-The result is a nested dictionary, not an exact copy of the source YAML. List indices such as `versions[0]` stay plain keys. A key that contains a dot, such as the OpenAPI path `/v1.0/users`, splits at the dot. CRD breadcrumbs leave out the `properties` segment above each top-level property.
+The result is a nested dictionary, not an exact copy of the source YAML. List indices such as `versions[0]` stay plain keys. A key that contains a dot, such as the OpenAPI path `/v1.0/users`, splits at the dot. CRD breadcrumbs leave out every `properties` segment below `spec`.
 
 ## MCP Server Integration
 

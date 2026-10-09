@@ -87,7 +87,7 @@ uvx --from 'opencrane[pipeline]' opencrane {COMMAND}
 
 ### CLI
 
-Commands that show `[--config CLASS]` in their usage line accept `--config myproject.config:MyConfig` to load a custom `OpenCraneConfig` subclass.
+Commands that show `[--config CLASS]` in their usage line accept `--config myproject.config:MyConfig` to load a custom `OpenCraneConfig` subclass. For `opencrane serve`, the server takes `middleware`, `token_verifier`, and `auth_provider` only from `OPENCRANE_CONFIG` or the `extensions:` key, not from `--config`.
 
 #### `opencrane init` — scaffold a new project
 
@@ -333,7 +333,7 @@ Encodes the input paragraph with the same model as the indexed corpus, then rend
 
 - **Scatter** — global PCA / UMAP / t-SNE projection of the corpus (or of a random sample with `--sample`), with the new paragraph as a highlighted diamond and its top-K neighbors ringed.
 - **Local neighborhood** — local PCA on just the paragraph + top-K neighbors. Every point has real coordinates, so distances between *neighbors* also carry meaning.
-- **Per-source alignment** — horizontal bar chart of mean similarity per source repo, answering "which docs does this paragraph best fit?"
+- **Per-source alignment** — horizontal bar chart of the highest similarity per source repo, with a tick for the mean of its 30 closest chunks, answering "which docs does this paragraph best fit?"
 
 Key flags:
 
@@ -640,7 +640,7 @@ class TerraformTreeWalker(YamlTreeWalker):
 The HTTP transport (`opencrane serve --transport http`) supports OAuth 2.1 authentication and scope-based content authorization. The stdio transport is always open (per the MCP spec).
 
 - **`local` mode** — OpenCrane acts as its own authorization server. When an MCP client starts authorization, OpenCrane redirects the browser to its `/login` form, where the consumer pastes a token or enters a username/password. No external identity provider needed. Configure via `auth.type: local` and set `PUBLIC_URL` + `OPENCRANE_ACCESS_TOKEN`. For a username and password instead of a token, also set `auth.local.method: password` and `OPENCRANE_LOGIN_USER`/`OPENCRANE_LOGIN_PASS`.
-- **`oauth` mode** — OpenCrane is an OAuth resource server; token issuance is handled by an external IdP (Keycloak, Auth0, Entra, …). Requires `pip install 'opencrane[auth]'`. Configure via `auth.type: oauth` with `oidc.issuer` and `oidc.audience`, and set `PUBLIC_URL`.
+- **`oauth` mode** — OpenCrane is an OAuth resource server; token issuance is handled by an external IdP (Keycloak, Auth0, Entra, …). Requires `pip install 'opencrane[auth]'`. Configure via `auth.type: oauth` with `oidc.issuer` and `oidc.audience`, and set `PUBLIC_URL` unless `allow_anonymous` is `true`.
 - **Scope-based source gating** — `scope_sources` maps OAuth scopes to sets of documentation sources. Callers only retrieve content from sources their token's scopes permit.
 - **`middleware` hook** — for authorization that config cannot express, register a custom ASGI middleware on your `OpenCraneConfig` subclass and call `set_allowed_sources(...)` to declare a request's permitted sources (e.g. resolve them from an external permissions service). Keeps project-specific auth logic out of OpenCrane.
 - **`custom` mode** — set `auth.type: custom` and supply your own `token_verifier` or `auth_provider` on `OpenCraneConfig` for full control over token validation or the authorization server. Either hook also needs `PUBLIC_URL`.

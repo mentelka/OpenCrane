@@ -8,7 +8,7 @@ OpenCrane's HTTP transport supports two independent layers of access control:
 ## The `auth:` configuration block
 
 > [!CAUTION]
-> With the default `type: none`, OpenCrane has no authentication. Anyone who can reach the HTTP port can read every source. Before you expose the server on a network, set another type, or set `default_sources` to the sources that anyone can read.
+> With the default `type: none`, OpenCrane has no authentication. Anyone who can reach the HTTP port can read every source. Before you expose the server on a network, set another type, or index only sources that anyone may read. `default_sources` limits `search_docs` only, and the `get_yaml_definition`, `get_list_members`, and `get_table_members` tools still return chunks from any indexed source.
 
 ```yaml
 # .opencrane/config.yaml
@@ -260,7 +260,7 @@ class Config(OpenCraneConfig):
 
 For authorization logic that config-driven `scope_sources` cannot express (e.g. resolving allowed sources from an external service, a custom header, or a JWT claim), register your own ASGI middleware on your `OpenCraneConfig` subclass. Each entry is a callable `(app) -> asgi_app` — typically a class that stores the wrapped app and implements `async __call__(self, scope, receive, send)`.
 
-Entries are applied as the **outermost** layers of the HTTP MCP app (the first entry is outermost and runs first), so they execute on every endpoint, before OpenCrane validates the token and before the tool handler. A middleware declares the request's permitted source names by calling `set_allowed_sources(...)`. OpenCrane loads the `middleware` list from `.opencrane/extensions.py`, so `.opencrane/config.yaml` must set `extensions: extensions.py`.
+Entries are applied as the **outermost** layers of the HTTP MCP app (the first entry is outermost and runs first), so they execute on every endpoint, before OpenCrane validates the token and before the tool handler. A middleware declares the request's permitted source names by calling `set_allowed_sources(...)`. OpenCrane loads the `middleware` list from the config class that `OPENCRANE_CONFIG` names, or from `.opencrane/extensions.py` when `.opencrane/config.yaml` sets `extensions: extensions.py`. The `opencrane serve --config` flag does not load the middleware or the auth hooks.
 
 > [!CAUTION]
 > `set_allowed_sources` replaces the source policy of the endpoint that serves the request, including an open endpoint. The following example grants `product-a` and `product-b` to every caller, including callers without a token on a `type: none` endpoint. Check the request path and the caller's token before you grant sources.
@@ -294,7 +294,7 @@ endpoint's `scope_sources` and `default_sources` policy. This is how a downstrea
 authorization logic out of OpenCrane.
 
 > [!CAUTION]
-> The fallback is restricted only if the endpoint sets `scope_sources` or `default_sources`. Without them, any request that the middleware does not resolve, such as a failed lookup, gives the caller every source. The same happens if OpenCrane cannot load your `OpenCraneConfig` class: it logs a warning and starts without the middleware. Set `default_sources` on the endpoint before you rely on this middleware.
+> The fallback is restricted only if the endpoint sets `scope_sources` or `default_sources`. Without them, any request that the middleware does not resolve, such as a failed lookup, gives the caller every source. The same happens if OpenCrane does not load your `OpenCraneConfig` class. When neither `OPENCRANE_CONFIG` nor the `extensions:` key is set, or the file is missing, OpenCrane starts without the middleware and logs nothing. When the class fails to load, it logs a warning. Set `default_sources` on the endpoint before you rely on this middleware.
 
 ```python
 # .opencrane/extensions.py
@@ -415,4 +415,4 @@ The stdio transport is always unauthenticated. OAuth applies to the HTTP transpo
 - Layer-2 enforcement is **server-side only** — the client-supplied `source_names` parameter can only narrow, never expand, the set of accessible sources.
 - Layer 2 applies to `search_docs` only. `get_yaml_definition`, `get_list_members`, and `get_table_members` return any chunk whose ID, `list_id`, or `table_id` the caller supplies, whatever its source.
 - Fail-closed: misconfigured auth (missing `PUBLIC_URL`, unknown source names, missing `opencrane[auth]` extra, `allow_anonymous` on a named `oauth` endpoint, more than one authenticated endpoint) raises an error at startup and refuses to serve.
-- Some problems do not stop the server. OpenCrane logs a warning and serves without the protection when it cannot parse `.opencrane/config.yaml` (it treats `auth` as `none`), when a `custom` endpoint has no hook, and when it cannot load your `OpenCraneConfig` class (it starts without the middleware).
+- Some problems do not stop the server. OpenCrane logs a warning and serves without the protection when it cannot parse `.opencrane/config.yaml` (it treats `auth` as `none`), when a `custom` endpoint has no hook, and when it cannot load your `OpenCraneConfig` class (it starts without the middleware). If neither `OPENCRANE_CONFIG` nor the `extensions:` key is set, OpenCrane starts without the middleware and logs nothing.

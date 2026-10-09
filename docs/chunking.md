@@ -59,7 +59,7 @@ The chunker uses a **Strategy Pattern** for extensible format support. It allows
 
 Available Strategies:
 1. **YamlChunkingStrategy** - Detects and processes YAML content; delegates structured YAML specs (e.g., CRDs, OpenAPI) to tree walkers for structured chunking, falls back to generic yaml_content type for other YAML
-2. **CodeChunkingStrategy** - Fenced code blocks with language detection; auto-detects CRDs and OpenAPI specifications in YAML code blocks and passes them to the built-in CRD and OpenAPI tree walkers. Other tree walkers, including custom ones, do not run on fenced YAML.
+2. **CodeChunkingStrategy** - Fenced code blocks with language detection; auto-detects CRDs and OpenAPI specifications in YAML code blocks and passes them to the built-in CRD and OpenAPI tree walkers. Fenced `yaml` and `yml` blocks go to `YamlChunkingStrategy` first, which runs every configured tree walker.
 3. **TableChunkingStrategy** - Markdown tables; emits one `table_row` chunk per data row (natural-language rendered, self-linked via `table_id` + `sibling_ids`), and delegates non-table regions to the list and prose strategies
 4. **ListChunkingStrategy** - Markdown lists; emits one chunk per list item
 5. **ProseChunkingStrategy** - Markdown/text with hierarchical headers (fallback strategy)
@@ -545,7 +545,7 @@ To add support for new YAML-based specifications (for example, AsyncAPI or AWS C
 
    As with strategies, OpenCrane loads this file only when `.opencrane/config.yaml` sets `extensions: extensions.py`.
 
-   The walker runs on YAML that `YamlChunkingStrategy` handles. It does not run on YAML inside fenced code blocks, because `CodeChunkingStrategy` uses only the built-in CRD and OpenAPI walkers.
+   The walker runs on every YAML block that `YamlChunkingStrategy` handles, including fenced `yaml` and `yml` blocks and unlabeled blocks that parse as YAML.
 
 3. **Add new chunk type to models**:
 

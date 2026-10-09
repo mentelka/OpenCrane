@@ -6,7 +6,7 @@ This guide describes how to structure markdown documentation so OpenCrane produc
 
 When OpenCrane processes a markdown file, strategies are tried in order and the first match wins:
 
-1. **YAML chunker** — claims fenced `yaml` and `yml` blocks, which OpenCrane takes out of the page before the other strategies run. A K8s CRD, OpenAPI spec, or JSON Schema goes to a tree walker for per-property chunking. Other nested YAML becomes one `yaml_content` chunk. A block of flat `key: value` pairs looks like front matter to this chunker, so it skips the block and the code chunker claims it.
+1. **YAML chunker** — claims fenced `yaml` and `yml` blocks, which OpenCrane takes out of the page before the other strategies run. A K8s CRD, OpenAPI spec, or JSON Schema goes to a tree walker for per-property chunking. Other YAML, including a block of flat `key: value` pairs, becomes one `yaml_content` chunk. The YAML chunker can also claim an unlabeled block, or a block in another language, whose lines look like `key: value` pairs.
 2. **Code chunker** — claims the remaining fenced code blocks.
 3. **Table chunker** — claims any section that contains a markdown table outside code fences. Emits one chunk per table data row and delegates the surrounding text to the list and prose chunkers.
 4. **List chunker** — claims any section that contains markdown list markers outside code fences. Emits one chunk per top-level list item plus prose chunks for the text around the list.
@@ -384,7 +384,7 @@ Every data row of a markdown table becomes its own chunk, rendered as natural-la
 
 ## Fenced Code Blocks
 
-- **Always label the language** after the opening fence. Unlabeled blocks are tagged `language: unknown`, which breaks language-filtered retrieval. OpenCrane also never parses an unlabeled block as YAML, so a CRD, OpenAPI spec, or JSON Schema in it gets no per-property chunks.
+- **Always label the language** after the opening fence. Unlabeled blocks are tagged `language: unknown`, which breaks language-filtered retrieval.
 
   Good:
 
