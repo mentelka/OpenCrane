@@ -23,13 +23,13 @@ This document defines the metadata schema for all chunk types. Metadata fields e
 ### `schema_type` (string, optional)
 - **Purpose**: High-level schema category for YAML content
 - **Values**: `"k8s_crd"`, `"openapi"`, `"json_schema"`
-- **Usage**: Route to appropriate validators and processors
+- **Usage**: Tell the schema formats apart
 
-## Hierarchical Navigation Metadata
+### Hierarchical Navigation Metadata
 
 These fields enable tree traversal and context reconstruction:
 
-### `breadcrumb_path` (string)
+#### `breadcrumb_path` (string)
 - **Purpose**: Exact location in the document/YAML tree structure
 - **Format**:
   - Prose chunks: `page title > section`, where the section is the first level ≥ 2 heading in the chunk
@@ -41,22 +41,21 @@ These fields enable tree traversal and context reconstruction:
   - **Precise Lookup**: Find exact position in nested structures
 - **Examples**:
   - Prose/list/table: `"VAT in Europe and How It Works in OCE > General Principles"`
-  - CRD: `"spec.versions[0].schema.openAPIV3Schema.properties.spec.properties.replicas"`
+  - CRD: `"spec.versions[0].schema.openAPIV3Schema.properties.spec.replicas"`
   - OpenAPI: `"paths./users/{id}.get"`
   - JSON Schema: `"properties.config.properties.database"`
 
-### `logical_parent` (string)
+#### `logical_parent` (string)
 - **Purpose**: Parent node in tree hierarchy (one level up)
-- **Format**: Same as breadcrumb_path but without final segment
+- **Format**: Dot-separated path of the parent node. It does not always equal `breadcrumb_path` without its final segment. For example, a top-level CRD property keeps the trailing `properties` segment, and a top-level JSON Schema property has the parent `"root"`.
 - **Usage**:
-  - **Parent Context**: Navigate up to parent for additional context
   - **Grouping**: Identify sibling chunks (chunks with same parent)
   - **Hierarchy Display**: Build visual tree representations
 - **Examples**:
   - For `spec.replicas` → parent is `"spec.versions[0].schema.openAPIV3Schema.properties.spec.properties"`
   - For `paths./users.get` → parent is `"paths./users"`
 
-### `neighbor_chunks` (array of chunk IDs)
+#### `neighbor_chunks` (array of chunk IDs)
 - **Purpose**: Sibling chunks at same tree level
 - **Definition**: All chunks sharing the same `logical_parent`
 - **Format**: Array of `chunk_id` values
@@ -64,7 +63,7 @@ These fields enable tree traversal and context reconstruction:
   - **Context Expansion**: Automatically fetch related properties/siblings
   - **Related Info**: Show users other properties at same level
   - **Completeness**: Ensure all related config options are retrieved
-- **Example**: For CRD property `spec.replicas`, neighbors include `spec.image`, `spec.config`, etc.
+- **Example**: For CRD property `spec.replicas`, neighbors include `spec.image`. A property that is split into smaller chunks has no chunk of its own, so it is not a neighbor.
 - **Empty Array**: Indicates chunk has no siblings (only child under parent)
 
 ## CRD-Specific Metadata (`chunk_type: "crd_definition"`)
@@ -348,16 +347,21 @@ def expand_with_neighbors(chunk: Chunk, chunk_db: Dict[str, Chunk]) -> List[Chun
     return [chunk] + neighbors
 ```
 
-### Parent Navigation (Python)
+### Parent Grouping (Python)
+
+The built-in walkers create a chunk only for each property or element they keep. A property that they split gets no chunk of its own. So no chunk usually has a `breadcrumb_path` equal to the `logical_parent` of another chunk, and you cannot walk up to a parent chunk. Group chunks by `logical_parent` instead:
+
 ```python
-def get_parent_context(chunk: Chunk, chunk_db: Dict[str, Chunk]) -> Optional[Chunk]:
-    """Navigate up to parent chunk."""
-    parent_path = chunk.metadata["logical_parent"]
-    # Find chunk with breadcrumb_path matching parent_path
-    for candidate in chunk_db.values():
-        if candidate.metadata.get("breadcrumb_path") == parent_path:
-            return candidate
-    return None
+from collections import defaultdict
+
+def group_by_parent(chunks: List[Chunk]) -> Dict[str, List[Chunk]]:
+    """Group chunks by their logical_parent, for example to build a tree view."""
+    groups: Dict[str, List[Chunk]] = defaultdict(list)
+    for chunk in chunks:
+        parent = chunk.metadata.get("logical_parent")
+        if parent is not None:
+            groups[parent].append(chunk)
+    return dict(groups)
 ```
 
 ### Re-hydration (Python)
@@ -376,6 +380,8 @@ def reconstruct_yaml(chunks: List[Chunk]) -> dict:
         set_nested_value(result, path.split("."), chunk.content)
     return result
 ```
+
+The result is a nested dictionary, not an exact copy of the source YAML. List indices such as `versions[0]` stay plain keys. A key that contains a dot, such as the OpenAPI path `/v1.0/users`, splits at the dot. CRD breadcrumbs leave out the `properties` segment above each top-level property.
 
 ## MCP Server Integration
 

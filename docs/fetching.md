@@ -11,6 +11,9 @@ A typical `update-docs.yml` workflow fetches documentation from one or more orga
 
 **Auto-discovery configuration**: The `AUTO_DISCOVERY_ORGS` environment variable controls which organizations have auto-discovery turned on. It takes a comma-separated list, for example `AUTO_DISCOVERY_ORGS=my-org,other-org`, and is empty by default. The `--org` flag also turns on auto-discovery for the organization it names. Each fetch discovers repositories in one organization only: the one that `--org` or the `ORG_NAME` environment variable names. Auto-discovery runs only if that organization is in `AUTO_DISCOVERY_ORGS`.
 
+> [!CAUTION]
+> If `ORG_NAME` names an organization that is not in `AUTO_DISCOVERY_ORGS` and you do not pass `--org`, the fetch discovers no repositories in it. It then deletes the local source directory and the `llmstxt/` output of every auto-discovered entry from that organization, and removes the entries from the source mapping config. Pass `--org`, or add the organization to `AUTO_DISCOVERY_ORGS`.
+
 The workflow makes sure that your project always operates on the latest docs.
 
 ## Automatic Cleanup
@@ -26,9 +29,10 @@ The fetch process automatically cleans up stale documentation sources:
 - **Manual Entry Protection**: Entries marked as `manual: true` are never automatically removed
 - **Local Entry Protection**: Entries marked as `local: true` are never fetched or removed (they reference local filesystem paths)
 - **Org Filtering**: The `--org` flag filters which auto-discovered repos are processed - auto-discovered entries from other orgs are skipped (not removed). Entries with `manual: true` are fetched whatever their org
-- **Failure Protection**: Repos that **fail to fetch** (network errors, no files, etc.) are NOT removed - only repos that lose the topic are removed
+- **Failure Protection**: Repos whose files **fail to download** (network errors, no files) are not removed
+- **What counts as stale**: An auto-discovered repository is stale when the discovery no longer returns it. That happens when the repository lost the topic, when OpenCrane could not read its topics after retries, or when the repository was deleted, renamed, or is not visible to the token
 
-This prevents accumulation of outdated documentation while protecting against temporary failures.
+This prevents accumulation of outdated documentation.
 
 ## Local Execution
 
@@ -65,7 +69,7 @@ When a source is added as a pre-existing `llmstxt` bundle (a URL or local path t
 - **Remote sources**: the companion URL is derived by swapping a trailing `llms-full.txt` for `llms.txt`, or, when that does not apply, by appending `/llms.txt` to the source's `docs_url`. If the companion returns a 404 or any error, fetch proceeds without it — no hard failure.
 - **Local sources**: a sibling `llms.txt` next to the source file is copied when present.
 
-When a companion index is available, the `chunk` step uses its per-page URLs so each chunk carries its specific page `source_url`. When it is absent, the `llms` step synthesizes an index from the source's `docs_url` (the base URL, repeated for every page) — see [Source mapping](source-mapping.md).
+When a companion index is available, the `chunk` step uses its per-page URLs so each chunk carries its specific page `source_url`. When it is absent, the `llms` step synthesizes an index from the source's `docs_url` (the base URL, repeated for every page) — see [Source mapping](source-mapping.md). If the source has no `docs_url` either, its pages get no URL.
 
 Companion entries may include the standard optional `: description` suffix after the link (`- [Title](url): some text`); it is parsed and ignored. GitBook-style companions often list source-file URLs ending in `.md` (or `/index.md`). When the source has a `docs_url` configured, those URLs are normalized to the rendered docs-site page (the extension is stripped and `/index.md` maps to its parent path), matching how `docs_url` sources resolve page URLs. Without a `docs_url`, companion URLs are used verbatim.
 

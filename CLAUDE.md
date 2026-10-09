@@ -55,7 +55,7 @@ tests/
 
 ## Tech Stack
 
-- **Python >= 3.11** (uses modern type hints, match statements)
+- **Python >= 3.11** (uses modern type hints)
 - **CLI**: Click
 - **Validation**: Pydantic v2
 - **Chunking**: Docling, custom YAML tree walkers
@@ -76,13 +76,13 @@ add → fetch → llms → chunk → embed → index → serve
 - Each step is independently callable via CLI (`opencrane <step>`) or via `opencrane build` for the full pipeline
 - `build` exits gracefully when no sources are configured (suggests `opencrane add`)
 - The `llms` step combines pre-existing llms-full.txt files even when `config.yaml` is empty
-- The `llms` step also writes a companion `llms.txt` index alongside each `llms-full.txt`; the `chunk` step reads both to assign each chunk its specific page `source_url`
+- The `llms` step also writes a companion `llms.txt` index next to the combined `llms-full.txt`; the `chunk` step reads both to assign each chunk its specific page `source_url`
 
 ## Development
 
 ### Running Tests
 
-**All tests must be run via `./pytest.sh` and not directly with `pytest` or `python -m pytest`.** This is mandatory because `./pytest.sh` sets PYTHONPATH to the project root, ensuring that the pip-installed `opencrane` package is used correctly.
+**All tests must be run via `./pytest.sh` and not directly with `pytest` or `python -m pytest`.** This is mandatory because `./pytest.sh` sets PYTHONPATH to the project root, so `opencrane` imports resolve to the source tree and `from mcp import ...` resolves to the pip-installed MCP SDK, not `opencrane/mcp/`.
 
 ```bash
 ./pytest.sh                              # All tests, unit and integration
@@ -106,15 +106,6 @@ add → fetch → llms → chunk → embed → index → serve
 
 ```bash
 pip install -e ".[dev]"
-```
-
-### Debugging
-
-Enable debug logging via `LOG_LEVEL` environment variable:
-
-```bash
-LOG_LEVEL=DEBUG opencrane chunk
-LOG_LEVEL=DEBUG opencrane serve
 ```
 
 ## Extension Points
@@ -152,7 +143,7 @@ Config is auto-discovered from the file that the `extensions` key in `.opencrane
 
 All outputs go to `.opencrane/` directory:
 - `.opencrane/sources/` — fetched documentation source files
-- `.opencrane/llmstxt/` — generated `llms-full.txt` bundles plus a companion `llms.txt` index (page title → page URL) written next to each `llms-full.txt`
+- `.opencrane/llmstxt/` — generated `llms-full.txt` bundles plus a companion `llms.txt` index (page title → page URL) written next to the combined `llms-full.txt`
 - `.opencrane/chunks.json` — chunked documents
 - `.opencrane/embeddings.json` — embedding vectors
 - `.opencrane/config.yaml` — source mapping and project configuration

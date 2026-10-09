@@ -17,16 +17,16 @@ opencrane embed
 ## Collection Schema
 
 When loaded into Milvus, each chunk becomes a vector with fields:
-- `chunk_id` (VARCHAR, primary key)
+- `chunk_id` (VARCHAR, primary key, `max_length` 64)
 - `embedding` (FLOAT_VECTOR, 768 dimensions)
 - `content` (VARCHAR, `max_length` 65,535)
-- `source_file` (VARCHAR)
-- `source_name` (VARCHAR)
-- `chunk_type` (VARCHAR: prose/code_snippet/crd_definition/openapi_spec/json_schema/yaml_content/list_item/table_row)
-- `metadata_json` (VARCHAR)
+- `source_file` (VARCHAR, `max_length` 512)
+- `source_name` (VARCHAR, `max_length` 256)
+- `chunk_type` (VARCHAR, `max_length` 32: prose/code_snippet/crd_definition/openapi_spec/json_schema/yaml_content/list_item/table_row)
+- `metadata_json` (VARCHAR, `max_length` 65,535)
 - `token_count` (INT64)
 - `line_start` (INT64)
-- `list_id` (VARCHAR)
-- `table_id` (VARCHAR)
+- `list_id` (VARCHAR, `max_length` 64)
+- `table_id` (VARCHAR, `max_length` 64)
 
 The `index` step creates an `AUTOINDEX` vector index with the cosine metric and `INVERTED` indexes on `list_id` and `table_id`, then loads the collection into memory.

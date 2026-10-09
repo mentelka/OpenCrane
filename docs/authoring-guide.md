@@ -6,8 +6,8 @@ This guide describes how to structure markdown documentation so OpenCrane produc
 
 When OpenCrane processes a markdown file, strategies are tried in order and the first match wins:
 
-1. **YAML chunker** — claims YAML documents (front matter is explicitly skipped).
-2. **Code chunker** — claims fenced code blocks. Fenced YAML that is a K8s CRD, OpenAPI spec, or JSON Schema is handed off to a tree walker for per-property chunking.
+1. **YAML chunker** — claims fenced `yaml` and `yml` blocks, which OpenCrane takes out of the page before the other strategies run. A K8s CRD, OpenAPI spec, or JSON Schema goes to a tree walker for per-property chunking. Other nested YAML becomes one `yaml_content` chunk. A block of flat `key: value` pairs looks like front matter to this chunker, so it skips the block and the code chunker claims it.
+2. **Code chunker** — claims the remaining fenced code blocks.
 3. **Table chunker** — claims any section that contains a markdown table outside code fences. Emits one chunk per table data row and delegates the surrounding text to the list and prose chunkers.
 4. **List chunker** — claims any section that contains markdown list markers outside code fences. Emits one chunk per top-level list item plus prose chunks for the text around the list.
 5. **Prose chunker** — the catch-all. Splits text into chunks at heading boundaries.
@@ -94,7 +94,7 @@ Headings are the primary chunk boundary. Get them right and most chunking proble
   Set `log_level` to `debug`, `info`, or `warn` to control log verbosity.
   ````
 
-- **Lead every page with an `#` title.** It anchors the first chunk and starts the breadcrumb of every prose chunk on the page.
+- **Lead every page with an `#` title.** It starts the breadcrumb of every prose chunk on the page.
 
   Good:
 
@@ -135,7 +135,7 @@ Headings are the primary chunk boundary. Get them right and most chunking proble
   Keys must be rotated every 90 days.
   ````
 
-- **Sections whose total content (heading + body) is under 15 characters are dropped** as garbage. In practice this means very short headings with no body text. Don't leave placeholder headings with no body.
+- **The prose chunker drops a heading that has no body text, whatever the length of the heading.** It also drops any section shorter than 15 characters. Don't leave placeholder headings with no body.
 
   Avoid:
 
@@ -195,7 +195,7 @@ Headings are the primary chunk boundary. Get them right and most chunking proble
 
   Avoid: "Run the main command to execute it all."
 
-- **Don't open a section with a URL heading** like `## https://example.com/page Title`. The chunk step strips the URL from a section heading, but the `llms` step does not. If the URL is in the leading `#` heading of a page with no front matter `title`, the URL becomes part of the page title in the `llms.txt` index. Keep headings human-readable.
+- **Don't open a section with a URL heading** like `## https://example.com/page Title`. OpenCrane does not remove the URL from every place the heading text appears. The URL can stay in list-item breadcrumbs and in section anchors. If the page has no front matter `title` and the URL heading is its first heading, at any level, the URL also becomes part of the page title in the `llms.txt` index. Keep headings human-readable.
 
   Avoid:
 
@@ -240,7 +240,7 @@ Every list item, including each nested item, becomes its own chunk, each carryin
 
   Avoid: `- Click Next.`
 
-- **First line first.** The item's first line is what appears in sibling previews (capped at 30 characters). Put the key phrase at the start; push explanation to continuation lines or nested bullets.
+- **First line first.** The item's first line is what appears in sibling previews (capped at 30 characters, including the ellipsis and, in an ordered list, the item number). Put the key phrase at the start; push explanation to continuation lines or nested bullets.
 
   Good:
 
@@ -274,7 +274,7 @@ Every list item, including each nested item, becomes its own chunk, each carryin
     - Contact: support@example.com
   ````
 
-- **Keep top-level lists short — aim for 5–8 items, hard limit 15.** Each list-item chunk carries `sibling_previews` — short text previews of every other item in the same list. Every retrieved chunk brings all those previews with it. A 15-item list means 14 preview strings riding along with every single result, which is token overhead that scales with list length. Beyond 15 items the previews also start truncating to `... +N more` with no text, so the agent can no longer reconstruct the full list from a single chunk without additional search calls.
+- **Keep top-level lists short — aim for 5–8 items, hard limit 15.** Each list-item chunk carries `sibling_previews` — short text previews of every other item in the same list. Every retrieved chunk brings all those previews with it. A 15-item list means 14 preview strings riding along with every single result, which is token overhead that scales with list length. A chunk shows at most 15 sibling previews. In a list of more than 16 items, OpenCrane replaces the rest with `... +N more` with no text, so the agent can no longer reconstruct the full list from a single chunk without additional search calls.
 
   If a list is growing past 8 items, ask whether the items naturally group into sub-topics. If so, split under `###` sub-sections with shorter lists under each — better retrieval and less per-chunk overhead.
 
@@ -376,7 +376,7 @@ Every data row of a markdown table becomes its own chunk, rendered as natural-la
 
   Each row chunk reads like: `# DIAMETER AVP types` / `The following AVP types from the base 3GPP Diameter dictionary are used:` / `AVP: 3GPP-IMSI.` / `Code: 1.` / `Type: UTF8String.`
 
-- **Put the identifying value in the first column.** The first column is the row's `row_key` and drives sibling previews (capped at 30 characters), so lead with the name or key, not a description.
+- **Put the identifying value in the first column.** The first column is the row's `row_key` and drives sibling previews (capped at 30 characters, including the ellipsis), so lead with the name or key, not a description.
 
 - **Give every column a header.** Cells are rendered as `Header: value.`; a blank header produces an unlabeled `: value.` line that reads poorly.
 
@@ -384,7 +384,7 @@ Every data row of a markdown table becomes its own chunk, rendered as natural-la
 
 ## Fenced Code Blocks
 
-- **Always label the language** after the opening fence. Unlabeled blocks are tagged `language: unknown`, which breaks language-filtered retrieval.
+- **Always label the language** after the opening fence. Unlabeled blocks are tagged `language: unknown`, which breaks language-filtered retrieval. OpenCrane also never parses an unlabeled block as YAML, so a CRD, OpenAPI spec, or JSON Schema in it gets no per-property chunks.
 
   Good:
 
@@ -442,19 +442,17 @@ Every data row of a markdown table becomes its own chunk, rendered as natural-la
   ```
   ````
 
-  If the structure context matters, use a comment to mark elision rather than literal `...` — the shown fields stay syntactically valid:
+  If the structure context matters, show the path from the top of the object down to the field, and leave out the sibling fields. Do not mark the omission with a comment. OpenCrane parses the block as YAML and stores it without comments, so the chunk does not show that anything is missing:
 
   ````md
   ```yaml
   sources:
     my-repo:
-      url: https://github.com/example/repo
-      # ... other fields ...
       branch: main
   ```
   ````
 
-  Avoid literal `...` ellipsis syntax — it is not valid YAML and makes the chunk unparseable:
+  Avoid a literal `...`. It is not valid YAML, so a reader who copies the block gets a parse error. OpenCrane keeps the block as plain code instead of parsing it as YAML:
 
   ````md
   ```yaml
@@ -576,7 +574,7 @@ Fenced YAML blocks are inspected by the chunker. If the YAML parses to a known s
   ```
   ````
 
-- **Properties under 800 tokens are emitted as one chunk. Properties over 800 tokens with nested `properties` or `items` are recursed into — each child becomes its own chunk instead.** No content is lost: every child chunk carries `crd_property_path` (full dot-notation path, e.g. `spec.config.database`), `logical_parent` (the parent's path), and `neighbor_chunks` (sibling IDs), so an agent can navigate the full schema tree from any leaf. The thresholds are hardcoded — there is no config knob. The only authoring lever is `$ref` into `$defs`: a large property broken into named definitions gives the walker more structure to recurse into.
+- **Properties under 800 tokens are emitted as one chunk. Properties over 800 tokens with nested `properties` or `items.properties` are recursed into — each child becomes its own chunk instead.** The split property gets no chunk of its own, so its own `description` and `type` do not appear in any chunk. Put the information a reader needs on the child properties. Every child chunk carries `logical_parent` (the parent's path), `neighbor_chunks` (sibling IDs), and the full dot-notation path of the property: `crd_property_path` on CRD chunks, for example `spec.config.database`, and `property_path` on JSON Schema and OpenAPI chunks. An agent can navigate the schema tree from any child chunk. The thresholds are hardcoded — there is no config knob. In a JSON Schema, you can also move a large property into a named definition under `$defs` and reference it with `$ref`. The walker chunks each definition separately. Kubernetes CRD schemas do not support `$ref`.
 
   Good:
 
@@ -595,7 +593,7 @@ Fenced YAML blocks are inspected by the chunker. If the YAML parses to a known s
 
 ## YAML Front Matter
 
-- **Front matter is ignored by chunking**, but its `title` is used for the page title. The `llms` step strips a `---`-delimited YAML block at the top of a file before the content reaches chunking. When a `title` field is present, it becomes the page title used in the `llms.txt` index and the leading `#` heading of the page in `llms-full.txt`. It takes precedence over the first body heading and the filename. See [Generating bundles](llms-generation.md#page-titles).
+- **Front matter is ignored by chunking**, but its `title` is used for the page title. The `llms` step strips a `---`-delimited YAML block at the top of a file before the content reaches chunking. When a `title` field is present, it becomes the page title used in the `llms.txt` index. OpenCrane adds a `# {title}` heading at the top of the page in `llms-full.txt`, unless the page already starts with exactly that heading. An existing H1 with different text stays under the new one, so the page then has two H1 headings. Make the body H1 match `title` exactly, or leave the H1 out. The `title` field takes precedence over the first body heading and the filename. See [Generating bundles](llms-generation.md#page-titles).
 
   Skipped as front matter (its `title` becomes the page title):
 
@@ -610,7 +608,7 @@ Fenced YAML blocks are inspected by the chunker. If the YAML parses to a known s
 
 - **Don't hide retrievable content in front matter.** Keep body content in the markdown body.
 
-  Avoid (the full description will never be retrieved):
+  Avoid (OpenCrane discards every front matter field except `title`, so search never retrieves the description):
 
   ````md
   ---
@@ -636,7 +634,7 @@ Fenced YAML blocks are inspected by the chunker. If the YAML parses to a known s
   them via MCP.
   ````
 
-- **Front matter must be valid YAML.** The `llms` step strips any front matter that parses as a YAML mapping, including lists and nested maps. If the block is not valid YAML, OpenCrane keeps the whole block in the page body, and it ends up in the chunks.
+- **Front matter must be valid YAML.** The `llms` step strips any front matter that parses as a YAML mapping, including mappings whose values are lists or nested maps. If the block is not valid YAML, OpenCrane keeps the whole block in the page body, and it ends up in the chunks.
 
   Kept in the body, because the unquoted colon in the `title` value is not valid YAML:
 

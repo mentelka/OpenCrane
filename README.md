@@ -23,7 +23,6 @@ A standalone, extensible RAG/MCP pipeline for building AI-powered documentation 
     - [pack](#opencrane-pack--package-for-distribution)
     - [inspect](#opencrane-inspect--launch-mcp-inspector)
     - [visualize](#opencrane-visualize--see-where-a-paragraph-lands-in-the-embedding-space)
-  - [Debugging](#debugging)
   - [Default file and directory names](#default-file-and-directory-names)
   - [Environment variables](#environment-variables)
   - [Source mapping file](#source-mapping-file-opencraneconfigyaml)
@@ -129,7 +128,7 @@ opencrane add
 Interactively add documentation sources to your project. The command loops, asking for each source:
 
 1. **GitHub repository** — adds an entry to `.opencrane/config.yaml` with the repo URL, docs path, and optional published docs URL. The `fetch` step downloads its documentation on the next `opencrane build`.
-2. **Existing llms.txt file** — provide a URL or local file path. OpenCrane downloads/copies it into `.opencrane/llmstxt/<name>/llms-full.txt`, and (when available) fetches the upstream companion `llms.txt` next to it for real per-page source URLs. The `llms` step merges it into the combined index and the `chunk` step assigns per-page `source_url`.
+2. **Existing llms.txt file** — provide a URL or local file path. The command adds the entry to `.opencrane/config.yaml`. On the next `fetch`, OpenCrane downloads/copies the file into `.opencrane/llmstxt/<name>/llms-full.txt`, and (when available) fetches the upstream companion `llms.txt` next to it for real per-page source URLs. The `llms` step merges it into the combined index and the `chunk` step assigns per-page `source_url`.
 
 After each source, you're asked whether to add another or finish.
 
@@ -141,6 +140,8 @@ opencrane build [--config CLASS] [--sources-dir PATH]... [--llmstxt-dir PATH]
 ```
 
 Runs all steps in sequence: fetch → llms → chunk → embed → index.
+
+The index step does not use `--chunks-file` or `--embeddings-file`. It reads the chunks and embeddings from the paths in `AI_DOCS_CHUNKS_FILE` and `AI_DOCS_EMBEDDINGS_FILE`, by default `.opencrane/chunks.json` and `.opencrane/embeddings.json`. To build with other paths, set these environment variables instead of the flags.
 
 | Flag | Description |
 |---|---|
@@ -172,7 +173,7 @@ Emits a clean `llms-full.txt` (no URLs injected into headings) plus a companion 
 |---|---|
 | `--sources-dir PATH` | Source directory to process; repeat for multiple dirs (overrides `AI_DOCS_SOURCES_DIRS` env var) |
 | `--llmstxt-dir PATH` | Output directory for llms-full.txt files (overrides `AI_DOCS_LLMSTXT_DIR` env var) |
-| `--force` | Regenerate even if no git changes are detected in the directories passed with `--sources-dir`. Without `--sources-dir`, the step always regenerates |
+| `--force` | Regenerate even if no git changes are detected in the directories passed with `--sources-dir` or set in `AI_DOCS_SOURCES_DIRS`. Without either, the step always regenerates. Git never reports changes in directories it ignores, so pass `--force` for those |
 
 #### `opencrane tokens` — token count report
 
@@ -203,7 +204,7 @@ Reads the companion `llms.txt` index (when present) alongside `llms-full.txt` to
 #### `opencrane embed` — generate embeddings
 
 ```bash
-opencrane embed [--config CLASS] [--chunks-file PATH] [--embeddings-file PATH]
+opencrane embed [--config CLASS] [--chunks-file PATH] [--embeddings-file PATH] [--force]
 ```
 
 | Flag | Description |
@@ -237,8 +238,8 @@ opencrane serve [--config CLASS] [--transport stdio|http]
 
 | Flag | Description |
 |---|---|
-| `--transport stdio` | *(default)* stdio transport for local MCP clients. Prints integration instructions for Claude Code, Cursor, Windsurf, VS Code, Zed, and Docker/Podman on startup |
-| `--transport http` | HTTP transport on port 8000 (Streamable HTTP, stateless). Used inside Docker/Podman containers. Port configurable via `MCP_HTTP_PORT` env var |
+| `--transport stdio` | *(default)* stdio transport for local MCP clients. Prints integration instructions for Claude Code, Cursor, Windsurf, VS Code, Zed, Amazon Q, and Docker/Podman on startup |
+| `--transport http` | HTTP transport on port 8000 (Streamable HTTP, stateless). The MCP endpoint is `http://localhost:8000/mcp`. Used inside Docker/Podman containers. Port configurable via `MCP_HTTP_PORT` env var |
 
 ##### Health endpoint (`/health`)
 
@@ -278,7 +279,7 @@ Example response (`200`):
 }
 ```
 
-`memory.status` is `unavailable` (and omits the byte fields) when no cgroup limit can be read, e.g. running outside a container. The same report is returned by the `health` MCP tool. The probe and memory thresholds are tunable — see the [health-check environment variables](#health-check-serve-http-transport).
+`memory.status` is `unavailable` (and omits the byte fields) when no cgroup memory files can be read, e.g. running outside a container. The same report is returned by the `health` MCP tool. The probe and memory thresholds are tunable — see the [health-check environment variables](#health-check-serve-http-transport).
 
 To deploy the probe, point the platform's liveness/readiness probe at `GET /health` on port 8000. Give the startup/initial-delay enough time for the embedding model to load (until then `/health` returns `503 initializing`), and use a longer liveness period so a real search isn't run every few seconds.
 
@@ -301,10 +302,10 @@ claude mcp add my-docs -- uvx my-docs-mcp
 claude mcp add my-docs -- uvx --from "git+https://github.com/you/my-docs-mcp" my-docs-mcp
 
 # From local path
-claude mcp add my-docs -- uvx --from .opencrane/pack/my-docs-mcp my-docs-mcp
+claude mcp add my-docs -- uvx --from .opencrane/pack my-docs-mcp
 ```
 
-The generated package includes the Milvus database and chunk index — recipients don't need to rebuild anything. The embedding model is downloaded automatically on first use.
+The generated package includes the Milvus database and the chunks file — recipients don't need to rebuild anything. The server downloads the embedding model on the first search or `health` call.
 
 Run `opencrane build` before packing. Use `--version` to bump the version when re-packing updated docs (so `uvx` pulls the new version instead of serving its cache).
 
@@ -330,7 +331,7 @@ echo "your paragraph" | opencrane visualize
 
 Encodes the input paragraph with the same model as the indexed corpus, then renders an interactive HTML with three views side-by-side:
 
-- **Scatter** — global PCA / UMAP / t-SNE projection of a corpus sample, with the new paragraph as a highlighted diamond and its top-K neighbors ringed.
+- **Scatter** — global PCA / UMAP / t-SNE projection of the corpus (or of a random sample with `--sample`), with the new paragraph as a highlighted diamond and its top-K neighbors ringed.
 - **Local neighborhood** — local PCA on just the paragraph + top-K neighbors. Every point has real coordinates, so distances between *neighbors* also carry meaning.
 - **Per-source alignment** — horizontal bar chart of mean similarity per source repo, answering "which docs does this paragraph best fit?"
 
@@ -355,15 +356,6 @@ Useful for:
 - **Duplicate detection** — if the top neighbor has very high similarity, you might be writing something that already exists.
 - **Which-repo-does-this-belong-to** — the per-source bar chart tells you which docs site has the closest existing content.
 - **Sanity-checking new docs** — if neighbors are a random mix of unrelated repos at low similarity, your paragraph is out-of-distribution.
-
-### Debugging
-
-Enable verbose logging for any command:
-
-```bash
-LOG_LEVEL=DEBUG opencrane build
-LOG_LEVEL=DEBUG opencrane add
-```
 
 ### Default file and directory names
 
@@ -392,9 +384,9 @@ CLI flags take precedence over environment variables. Use env vars for persisten
 
 | Variable | Default | Description |
 |---|---|---|
-| `ORG_NAME` | `` | GitHub organisation to fetch repositories from (see also `--org` flag) |
+| `ORG_NAME` | `` | GitHub organisation to auto-discover repositories from (see also `--org` flag). Auto-discovery runs only when `AUTO_DISCOVERY_ORGS` also lists the organization. The `--org` flag adds it for you. |
 | `FETCH_REPO` | `` | Restrict fetch to one or more sources by path key, comma-separated (see also `--source` flag) |
-| `GITHUB_TOKEN` | `` | GitHub API token for authenticated requests |
+| `GITHUB_TOKEN` | `` | GitHub API token. Required: `opencrane fetch` fails without it. |
 | `DOCS_TOPIC` | `documentation` | GitHub topic used to discover repositories automatically within the org |
 | `AUTO_DISCOVERY_ORGS` | `` | Whitelist of orgs where topic-based auto-discovery is enabled |
 | `TARGET_DIR` | `.opencrane/sources` | Local directory where fetched docs are stored |
@@ -438,6 +430,8 @@ OpenCrane supports two Milvus modes. By default it uses **Milvus Lite**, a local
 | `MILVUS_HOST` | `localhost` | Milvus server host (server mode only) |
 | `MILVUS_PORT` | `19530` | Milvus server port (server mode only) |
 | `MILVUS_COLLECTION` | `ai_docs_chunks_v1` | Milvus collection name |
+| `AI_DOCS_CHUNKS_FILE` | `.opencrane/chunks.json` | Chunks file that `index` loads and that the MCP server reads for keyword search. `index` reads only this variable, not the `--chunks-file` flag |
+| `AI_DOCS_EMBEDDINGS_FILE` | `.opencrane/embeddings.json` | Embeddings file that `index` loads. `index` reads only this variable, not the `--embeddings-file` flag |
 | `MILVUS_INSERT_BATCH_SIZE` | `2000` | Max chunks per insert call during `index`. Keeps each call short enough to finish before Milvus keepalive timeouts, which would otherwise trigger client retries that duplicate rows |
 | `HYBRID_ALPHA` | `0.6` | Weight of vector search vs keyword search (1.0 = pure vector, 0.0 = pure BM25) |
 | `DROP_EXISTING` | `false` | When `true`, `index` deletes and rebuilds the Milvus collection. Without it, `index` skips a collection that already has rows. See [`opencrane index`](#opencrane-index--load-into-milvus) |
@@ -465,6 +459,8 @@ Each entry supports the following fields:
 | `docs_path` | No | Path within the repo where docs are stored (e.g. `docs`) |
 | `docs_url` | No | Base URL of the published documentation site (e.g. `https://docs.example.com/product`). When set, per-page URLs are built from it instead of `url` — lets AI agents point users to rendered docs rather than raw GitHub files. For external `llmstxt` sources with no companion `llms.txt`, `docs_url` is used as the base URL for every page in that bundle. If neither is set, chunks from that source get no `source_url`. |
 | `manual` | No | When `true`, the entry is user-managed and will not be overwritten by `opencrane fetch` auto-discovery |
+| `local` | No | When `true`, the path key points to a local directory in the workspace. `opencrane fetch` skips the entry, and the pipeline reads directly from that path |
+| `type` | No | `llmstxt` for an existing `llms-full.txt` file, where `url` is its URL or local path. Default: a GitHub repository |
 | `branch` | No | Pin to a specific branch (e.g. `develop`) |
 | `tag` | No | Pin to a specific git tag (e.g. `v2.1.0`) |
 | `release` | No | Pin to a specific GitHub release by its tag name (e.g. `v2.1.0`) — validated via the Releases API |
@@ -643,11 +639,11 @@ class TerraformTreeWalker(YamlTreeWalker):
 
 The HTTP transport (`opencrane serve --transport http`) supports OAuth 2.1 authentication and scope-based content authorization. The stdio transport is always open (per the MCP spec).
 
-- **`local` mode** — OpenCrane acts as its own authorization server. When an MCP client starts authorization, OpenCrane redirects the browser to its `/login` form, where the consumer pastes a token or enters a username/password. No external identity provider needed. Configure via `auth.type: local` and set `PUBLIC_URL` + `OPENCRANE_ACCESS_TOKEN` (or `OPENCRANE_LOGIN_USER`/`OPENCRANE_LOGIN_PASS`).
-- **`oauth` mode** — OpenCrane is an OAuth resource server; token issuance is handled by an external IdP (Keycloak, Auth0, Entra, …). Requires `pip install 'opencrane[auth]'`. Configure via `auth.type: oauth` with `oidc.issuer` and `oidc.audience`.
+- **`local` mode** — OpenCrane acts as its own authorization server. When an MCP client starts authorization, OpenCrane redirects the browser to its `/login` form, where the consumer pastes a token or enters a username/password. No external identity provider needed. Configure via `auth.type: local` and set `PUBLIC_URL` + `OPENCRANE_ACCESS_TOKEN`. For a username and password instead of a token, also set `auth.local.method: password` and `OPENCRANE_LOGIN_USER`/`OPENCRANE_LOGIN_PASS`.
+- **`oauth` mode** — OpenCrane is an OAuth resource server; token issuance is handled by an external IdP (Keycloak, Auth0, Entra, …). Requires `pip install 'opencrane[auth]'`. Configure via `auth.type: oauth` with `oidc.issuer` and `oidc.audience`, and set `PUBLIC_URL`.
 - **Scope-based source gating** — `scope_sources` maps OAuth scopes to sets of documentation sources. Callers only retrieve content from sources their token's scopes permit.
 - **`middleware` hook** — for authorization that config cannot express, register a custom ASGI middleware on your `OpenCraneConfig` subclass and call `set_allowed_sources(...)` to declare a request's permitted sources (e.g. resolve them from an external permissions service). Keeps project-specific auth logic out of OpenCrane.
-- **`custom` mode** — set `auth.type: custom` and supply your own `token_verifier` or `auth_provider` on `OpenCraneConfig` for full control over token validation or the authorization server.
+- **`custom` mode** — set `auth.type: custom` and supply your own `token_verifier` or `auth_provider` on `OpenCraneConfig` for full control over token validation or the authorization server. Either hook also needs `PUBLIC_URL`.
 
 See [docs/auth.md](docs/auth.md) for the full configuration reference, environment variables, and worked examples (including a complete external-permissions middleware).
 

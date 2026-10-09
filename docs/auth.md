@@ -3,9 +3,12 @@
 OpenCrane's HTTP transport supports two independent layers of access control:
 
 - **Layer 1 — Authentication** (who may connect): implemented via OAuth 2.1 using the MCP Python SDK. The `auth.type` config key selects the mode. stdio transport is always unauthenticated (per the MCP spec — stdio uses environment credentials).
-- **Layer 2 — Authorization** (which sources a caller may retrieve): declarative `scope → [source_name,…]` mapping enforced server-side by constraining every search against the Milvus and BM25 backends.
+- **Layer 2 — Authorization** (which sources a caller may retrieve): declarative `scope → [source_name,…]` mapping enforced server-side by constraining every `search_docs` call against the Milvus and BM25 backends. The tools that fetch a chunk, list, or table by ID do not apply it. See [Security notes](#security-notes).
 
 ## The `auth:` configuration block
+
+> [!CAUTION]
+> With the default `type: none`, OpenCrane has no authentication. Anyone who can reach the HTTP port can read every source. Before you expose the server on a network, set another type, or set `default_sources` to the sources that anyone can read.
 
 ```yaml
 # .opencrane/config.yaml
@@ -35,7 +38,10 @@ auth:
   type: local
   local:
     method: token     # token (default) | password
+    scopes: [docs:internal]   # optional; granted to every token this server issues
 ```
+
+The optional `local.scopes` list sets the scopes of every access token that the login form issues. All users who sign in get the same scopes. Without `local.scopes`, tokens carry no scopes, so `scope_sources` never matches and every caller gets `default_sources`.
 
 ### Environment variables
 
@@ -75,7 +81,7 @@ The client detects it is unauthorized → prompts the consumer to authorize → 
 
 ## `oauth` mode — external IdP (Keycloak, Auth0, Entra, …)
 
-OpenCrane acts as an OAuth 2.1 resource server. Token issuance is delegated to an external identity provider. Bearer tokens are validated by checking the IdP's JWKS, the audience binding, and expiry.
+OpenCrane acts as an OAuth 2.1 resource server. Token issuance is delegated to an external identity provider. Bearer tokens are validated by checking the IdP's JWKS, the issuer, the audience binding, and expiry.
 
 ### Additional dependency
 
@@ -104,7 +110,7 @@ auth:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `oidc.issuer` | Yes | External IdP issuer URL |
-| `oidc.audience` | Yes¹ | Resource identifier — the `aud` claim in tokens must include this value |
+| `oidc.audience` | Yes¹ | Resource identifier, as a string or a list of strings. The `aud` claim in tokens must include one of the values. |
 | `oidc.scope_claim` | No | JWT claim name to read scopes from (default: `scope`) |
 | `oidc.verify_audience` | No | Enforce the `aud` binding (default: `true`). Set to `false` only for IdPs that cannot stamp the audience — see below. With `false`, OpenCrane accepts tokens that the IdP issued for other services. |
 | `oidc.advertised_scopes` | No | Scope names published as `scopes_supported` in the protected-resource metadata. Advertised only, never enforced — see below. |
@@ -124,6 +130,7 @@ auth:
   type: oauth
   oidc:
     issuer: https://login.example.com
+    audience: opencrane-docs
     advertised_scopes: [openid]
 ```
 
@@ -189,7 +196,7 @@ clients must be configured with a token or authorization endpoint directly.
 
 ## Layer 2 — Authorization: `scope_sources` and `default_sources`
 
-`scope_sources` maps an OAuth scope name to the list of source names that scope grants access to. It is optional and works with both `local` and `oauth` modes.
+`scope_sources` maps an OAuth scope name to the list of source names that scope grants access to. It is optional and works with every mode whose tokens carry scopes: `oauth`, `custom`, and `local` with `local.scopes` set. `default_sources` applies in every mode, including `none`.
 
 ```yaml
 auth:
@@ -216,14 +223,14 @@ Source names in `scope_sources` and `default_sources` must match names in `sourc
 
 ## `custom` mode — escape-hatch for operator-supplied auth
 
-Set `auth.type: custom` in config and provide either `token_verifier` or `auth_provider` on your `OpenCraneConfig` subclass in `.opencrane/extensions.py`.
+Set `auth.type: custom` in config and provide either `token_verifier` or `auth_provider` on your `OpenCraneConfig` subclass in `.opencrane/extensions.py`. OpenCrane loads that file only when `.opencrane/config.yaml` sets `extensions: extensions.py`, or when the `OPENCRANE_CONFIG` environment variable points to your config class. With the `extensions:` key, the class must be named `Config`.
 
 > [!CAUTION]
-> If neither hook is set, the `custom` type runs with no authentication and accepts every request. Set `token_verifier` or `auth_provider` before you expose the server.
+> If neither hook is set, the `custom` type runs with no authentication and accepts every request. The same happens when OpenCrane does not load `.opencrane/extensions.py`, for example because the `extensions:` key is missing. OpenCrane only logs a warning. Set `token_verifier` or `auth_provider` and check the startup log before you expose the server.
 
 ### `token_verifier` (resource-server mode)
 
-Supply a `TokenVerifier` (the MCP SDK's `mcp.server.auth.provider.TokenVerifier`). OpenCrane wires it as a resource server. `PUBLIC_URL` is required.
+Supply an instance of a class that implements the MCP SDK's `TokenVerifier` protocol (`mcp.server.auth.provider.TokenVerifier`). OpenCrane wires it as a resource server. `PUBLIC_URL` is required.
 
 ```python
 # .opencrane/extensions.py
@@ -236,7 +243,7 @@ class Config(OpenCraneConfig):
 
 ### `auth_provider` (self-hosted authorization-server mode)
 
-Supply an `OAuthAuthorizationServerProvider` subclass instance. OpenCrane mounts the full OAuth AS routes and wires your provider. `PUBLIC_URL` is required.
+Supply an instance of a class that implements the MCP SDK's `OAuthAuthorizationServerProvider` protocol. OpenCrane mounts the full OAuth AS routes and wires your provider. `PUBLIC_URL` is required.
 
 ```python
 # .opencrane/extensions.py
@@ -253,7 +260,10 @@ class Config(OpenCraneConfig):
 
 For authorization logic that config-driven `scope_sources` cannot express (e.g. resolving allowed sources from an external service, a custom header, or a JWT claim), register your own ASGI middleware on your `OpenCraneConfig` subclass. Each entry is a callable `(app) -> asgi_app` — typically a class that stores the wrapped app and implements `async __call__(self, scope, receive, send)`.
 
-Entries are applied as the **outermost** layers of the HTTP MCP app (the first entry is outermost and runs first), so they execute before the tool handler. A middleware declares the request's permitted source names by calling `set_allowed_sources(...)`:
+Entries are applied as the **outermost** layers of the HTTP MCP app (the first entry is outermost and runs first), so they execute on every endpoint, before OpenCrane validates the token and before the tool handler. A middleware declares the request's permitted source names by calling `set_allowed_sources(...)`. OpenCrane loads the `middleware` list from `.opencrane/extensions.py`, so `.opencrane/config.yaml` must set `extensions: extensions.py`.
+
+> [!CAUTION]
+> `set_allowed_sources` replaces the source policy of the endpoint that serves the request, including an open endpoint. The following example grants `product-a` and `product-b` to every caller, including callers without a token on a `type: none` endpoint. Check the request path and the caller's token before you grant sources.
 
 A minimal example — grant a fixed set of sources to every caller:
 
@@ -284,7 +294,7 @@ endpoint's `scope_sources` and `default_sources` policy. This is how a downstrea
 authorization logic out of OpenCrane.
 
 > [!CAUTION]
-> The fallback is restricted only if the endpoint sets `scope_sources` or `default_sources`. Without them, any request that the middleware does not resolve, such as a failed lookup, gives the caller every source. Set `default_sources` on the endpoint before you rely on this middleware.
+> The fallback is restricted only if the endpoint sets `scope_sources` or `default_sources`. Without them, any request that the middleware does not resolve, such as a failed lookup, gives the caller every source. The same happens if OpenCrane cannot load your `OpenCraneConfig` class: it logs a warning and starts without the middleware. Set `default_sources` on the endpoint before you rely on this middleware.
 
 ```python
 # .opencrane/extensions.py
@@ -384,7 +394,7 @@ For a `type: oauth` endpoint, its RFC 9728 protected-resource metadata and `WWW-
 
 - **Backward compatible.** No `auth:` block, or a flat block with a top-level `type:` (or any single-block key such as `scope_sources`), still means a single endpoint at `/mcp`. Nothing changes for existing configs.
 - **Endpoint names** may contain letters, digits, `-` and `_`. They must not collide with the reserved single-block keys (`type`, `allow_anonymous`, `scope_sources`, `default_sources`, `oidc`, `local`) — such a name would make the block parse as a single flat endpoint instead.
-- **`allow_anonymous` is not supported for named endpoints.** Model open access as a `type: none` endpoint and authenticated access as a strict `type: oauth` endpoint; mixing the two on one path is exactly what the optional-auth mode was a single-endpoint workaround for. Setting it on a named entry fails closed at startup.
+- **`allow_anonymous` is not supported for named endpoints.** Model open access as a `type: none` endpoint and authenticated access as a strict `type: oauth` endpoint; mixing the two on one path is exactly what the optional-auth mode was a single-endpoint workaround for. Setting it on a named `oauth` entry fails closed at startup. On other types, OpenCrane ignores it.
 - **At most one authenticated endpoint.** Because the SDK applies token verification as app-level middleware across the merged routes, a deployment may expose only one authenticating endpoint (`oauth`, `local`, or `custom` with a `token_verifier` or `auth_provider` hook; a `custom` endpoint with neither hook is open); pair it with any number of `type: none` endpoints. Two authenticated endpoints fail closed at startup. (A single open + single authenticated endpoint — the common public/private split — is fully supported.)
 - **Advertised topics are scoped per endpoint.** The `search_docs` tool's advertised topic list and `source_names` enum are scoped to what the endpoint serves, so an open endpoint does not expose the names of private topics served elsewhere. A `type: none` endpoint with `default_sources` advertises only those sources; every other endpoint (open with no `default_sources`, or authenticated — where per-caller sources are resolved at request time) advertises all sources. This scopes only the advertised metadata; result-level authorization is always enforced separately.
 - **Shared `/health`.** All endpoints share one readiness probe at `/health`.
@@ -403,4 +413,6 @@ The stdio transport is always unauthenticated. OAuth applies to the HTTP transpo
 - `oauth` mode enforces **audience binding** — tokens not explicitly minted for `oidc.audience` are rejected (prevents confused-deputy attacks). The exception is `oidc.verify_audience: false`, which skips this check.
 - `local` mode credentials come from environment variables only — never the config file. Constant-time comparison is used for token matching.
 - Layer-2 enforcement is **server-side only** — the client-supplied `source_names` parameter can only narrow, never expand, the set of accessible sources.
-- Fail-closed: misconfigured auth (missing `PUBLIC_URL`, unknown source names, missing `opencrane[auth]` extra) raises an error at startup and refuses to serve.
+- Layer 2 applies to `search_docs` only. `get_yaml_definition`, `get_list_members`, and `get_table_members` return any chunk whose ID, `list_id`, or `table_id` the caller supplies, whatever its source.
+- Fail-closed: misconfigured auth (missing `PUBLIC_URL`, unknown source names, missing `opencrane[auth]` extra, `allow_anonymous` on a named `oauth` endpoint, more than one authenticated endpoint) raises an error at startup and refuses to serve.
+- Some problems do not stop the server. OpenCrane logs a warning and serves without the protection when it cannot parse `.opencrane/config.yaml` (it treats `auth` as `none`), when a `custom` endpoint has no hook, and when it cannot load your `OpenCraneConfig` class (it starts without the middleware).

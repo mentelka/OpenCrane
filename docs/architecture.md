@@ -1,6 +1,6 @@
 # OpenCrane architecture
 
-OpenCrane is a command-line tool that builds and runs an AI-powered documentation search pipeline. It ingests Markdown documentation from GitHub repositories, processes it into typed semantic chunks, generates vector embeddings, stores them in a vector database, and exposes a Model Context Protocol (MCP) server that AI assistants can query.
+OpenCrane is a command-line tool that builds and runs an AI-powered documentation search pipeline. It ingests documentation from GitHub repositories, local directories, and existing `llms-full.txt` files, processes it into typed semantic chunks, generates vector embeddings, stores them in a vector database, and exposes a Model Context Protocol (MCP) server that AI assistants can query.
 
 ## Typical role
 
@@ -40,7 +40,7 @@ The `opencrane fetch` command downloads the documentation files of registered Gi
 - **Manual:** Uses the list of repositories you defined in `.opencrane/config.yaml`.
 
 > [!CAUTION]
-> When a repository loses the discovery topic, `opencrane fetch` deletes its source directory and its generated `llmstxt/` output. To keep the source, set `manual: true` on its entry before you run the fetch.
+> When a repository loses the discovery topic, `opencrane fetch` removes its entry from the source mapping file. It also deletes its source directory and its generated `llmstxt/` output. To keep the source, set `manual: true` on its entry before you run the fetch.
 
 The command fetches repositories concurrently. It auto-removes stale sources (repositories that lost the discovery topic) unless you mark the source `manual: true` in the configuration. Sources marked `local: true` are never fetched — OpenCrane uses them as-is from the local file system.
 
@@ -50,7 +50,7 @@ The `opencrane llms` command flattens the fetched Markdown files into a hierarch
 
 - Processes Markdown files recursively.
 - Emits **clean** content — no URLs are injected into headings.
-- Adds separators (a `<!-- opencrane:page -->` sentinel between files within a source, `======` between sources) and normalizes each page to lead with a single `# {title}` H1 (title precedence: frontmatter `title` → first heading → filename). The page separator is a collision-proof HTML comment so markdown thematic breaks (`---`) in content are not mistaken for page boundaries.
+- Adds separators (a `<!-- opencrane:page -->` sentinel between files within a source, `======` between sources) and adds a `# {title}` heading at the start of each page, unless the page already starts with exactly that heading (title precedence: frontmatter `title` → first heading → filename). An existing H1 with different text stays under the new heading, so the page then has two H1 headings. The page separator is a collision-proof HTML comment so markdown thematic breaks (`---`) in content are not mistaken for page boundaries.
 - Rewrites relative links to work in the flattened output.
 - Invokes fence type handlers for structured content such as OpenAPI specs and Kubernetes CRDs embedded as fenced code blocks.
 - Writes a companion `llms.txt` index next to each `llms-full.txt`: a `# {project}` H1 with one `## {source}` section per source and a `- [title](page_url)` link per page, in the same order as the bundle. This index is how the `chunk` step recovers each chunk's specific page `source_url`. For external `llmstxt` sources, a fetched companion `llms.txt` (real per-page URLs) is merged, or an index is synthesized from the source's `docs_url` when no companion exists.
@@ -137,13 +137,13 @@ This package contains the implementation of all pipeline stages. The key modules
 - **`opencrane/rag/chunker.py`** — Top-level chunking orchestration. Loads bundles, resolves source names, and writes `chunks.json`.
 - **`opencrane/rag/services/file_processor.py`** — Strategy-pattern chunking. Evaluates strategies in order; the first match handles the fragment.
 - **`opencrane/rag/generate_embeddings.py`** — Batch embedding generation.
-- **`opencrane/rag/services/source_mapping.py`** — Reads `.opencrane/config.yaml` and resolves source URLs to source names.
+- **`opencrane/rag/services/source_mapping.py`** — Reads the source mapping file (`.opencrane/config.yaml` by default) and resolves source URLs to source names.
 
 Tree walkers live in `opencrane/rag/services/chunking_strategies/` and handle structured YAML documents:
 
 - **`k8s_crd_tree_walker.py`** — Kubernetes CRD chunking. Produces one chunk per `spec.properties` field and recursively splits nested properties that exceed 800 tokens.
-- **`openapi_tree_walker.py`** — OpenAPI 3.x spec chunking. Produces element-level chunks (info, servers, paths, components) and per-method operation chunks.
-- **`json_schema_tree_walker.py`** — JSON Schema chunking. Produces property-based chunks with recursive nesting for complex schemas.
+- **`openapi_tree_walker.py`** — OpenAPI 3.x spec chunking. Produces one chunk for `info`, one for each server, one for each operation (path and method), and one for each item under `components`. `security` and `tags` get a chunk each. A schema over 800 tokens splits into chunks for its properties.
+- **`json_schema_tree_walker.py`** — JSON Schema chunking. Produces one chunk per property, and splits a property that exceeds 800 tokens into chunks for its nested properties.
 
 ### MCP server (`opencrane/mcp/`)
 
@@ -151,9 +151,9 @@ With the stdio transport, the server starts its backing services on the first to
 
 - `get_yaml_definition` fetches a single chunk by its primary key.
 - `get_list_members` and `get_table_members` query the indexed `list_id` / `table_id` columns (constrained to the relevant `chunk_type`) for a list's or table's members.
-- Search reads `token_count` and each chunk's `source_url` straight from the query result rather than re-deriving them.
+- Semantic search reads `token_count` and each chunk's `source_url` straight from the query result rather than re-deriving them. Keyword and hybrid search also use the in-memory BM25 index described below.
 
-On the first request for the tool list, the server asks Milvus which `chunk_type` values the collection contains, and caches the answer for the life of the process. The query reads only the `chunk_type` field through `query_iterator`, not the chunk content. The tool list then matches the indexed content without a separate file that could get out of sync with the database. The two backing services are:
+On the first request for the tool list, the server asks Milvus which `chunk_type` values the collection contains, and caches the answer for the life of the process. The query reads only the `chunk_type` field through `query_iterator`, not the chunk content. The tool list then matches the indexed content without a separate file that could get out of sync with the database. The server does not refresh this answer, so restart the server after you re-index. The two backing services are:
 
 - **`opencrane/mcp/services/milvus_client.py`** — Manages the connection to Milvus and runs the vector searches.
 - **`opencrane/mcp/services/keyword_search.py`** — Builds a Best Matching 25 (BM25) index lazily from `chunks.json` on the first keyword or hybrid query. This index holds the chunks in memory, so the server needs `chunks.json` for keyword and hybrid search.
@@ -216,7 +216,7 @@ class Config(OpenCraneConfig):
 To add a tree walker, append it to `yaml_tree_walkers`. Each walker must implement two methods:
 
 - **`can_handle(cls, doc: dict) -> bool`** — Returns `True` if this walker handles the given YAML document.
-- **`walk(self) -> List[Chunk]`** — Returns typed `Chunk` objects for the document.
+- **`walk(self) -> list[Chunk]`** — Returns typed `Chunk` objects for the document.
 
 ```python
 class TerraformTreeWalker(YamlTreeWalker):
@@ -252,7 +252,7 @@ The `Chunk` model (`opencrane/shared/models/chunk.py`) is the core data structur
 | Milvus | Vector database for embedding storage and similarity search |
 | sentence-transformers | Embedding model (`nomic-ai/nomic-embed-text-v1.5` by default) |
 | rank-bm25 | BM25 scoring for keyword search |
-| PyGithub | GitHub API client for repository discovery and cloning |
+| PyGithub | GitHub API client for repository discovery and file download |
 | Docling | Document parsing for PDF, DOCX, and other non-Markdown formats |
 | tiktoken | Token counting using the `cl100k_base` encoding |
 | Pydantic | Data model validation |

@@ -2,8 +2,8 @@
 
 ## Testing Strategy
 
-- **Unit tests** (`tests/unit/`) - Fast, mocked dependencies, run during development (~10s)
-- **Integration tests** (`tests/integration/`) - Real services, slower, marked with `@pytest.mark.integration` (~2-3min)
+- **Unit tests** (`tests/unit/`) - Fast, mocked dependencies, run during development
+- **Integration tests** (`tests/integration/`) - Slower end-to-end tests. Some of them run against an embedded Milvus Lite database
   - Includes **acceptance tests** - end-to-end tests via MCP protocol using production data
 - **Coverage requirement** - 100% enforced by `./pytest.sh --check-coverage`
 
@@ -20,7 +20,7 @@
 ./pytest.sh tests/unit/
 
 # Run only integration tests
-./pytest.sh -m integration
+./pytest.sh tests/integration/
 
 # Run specific test file
 ./pytest.sh tests/integration/test_mcp_tools_acceptance.py

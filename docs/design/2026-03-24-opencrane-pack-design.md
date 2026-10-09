@@ -1,5 +1,8 @@
 # Design: `opencrane pack`
 
+> [!NOTE]
+> This is the design record from March 2026. The implementation differs in places, for example the default output directory and the `METADATA_SCHEMA_PATH` variable, which was not implemented. For the current behavior, see `opencrane/pack.py` and the README.
+
 ## Problem
 
 Users who build documentation search with OpenCrane locally have no simple way to share the resulting MCP server with teammates. Docker works but requires infrastructure. The ideal sharing experience is a one-liner that others paste into their Claude Code (or any MCP client) config.

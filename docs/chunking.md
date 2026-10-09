@@ -59,7 +59,7 @@ The chunker uses a **Strategy Pattern** for extensible format support. It allows
 
 Available Strategies:
 1. **YamlChunkingStrategy** - Detects and processes YAML content; delegates structured YAML specs (e.g., CRDs, OpenAPI) to tree walkers for structured chunking, falls back to generic yaml_content type for other YAML
-2. **CodeChunkingStrategy** - Fenced code blocks with language detection; auto-detects structured YAML specs in YAML code blocks and delegates to tree walkers
+2. **CodeChunkingStrategy** - Fenced code blocks with language detection; auto-detects CRDs and OpenAPI specifications in YAML code blocks and passes them to the built-in CRD and OpenAPI tree walkers. Other tree walkers, including custom ones, do not run on fenced YAML.
 3. **TableChunkingStrategy** - Markdown tables; emits one `table_row` chunk per data row (natural-language rendered, self-linked via `table_id` + `sibling_ids`), and delegates non-table regions to the list and prose strategies
 4. **ListChunkingStrategy** - Markdown lists; emits one chunk per list item
 5. **ProseChunkingStrategy** - Markdown/text with hierarchical headers (fallback strategy)
@@ -140,7 +140,7 @@ All chunks include a `metadata` object with type-specific fields:
   - `"k8s_crd"` - Kubernetes Custom Resource Definition
   - `"openapi"` - OpenAPI specification
   - `"json_schema"` - JSON Schema
-- Usage: Route to appropriate schema validators and processors
+- Usage: Tell the schema formats apart
 - Present in: YAML chunks (crd_definition, openapi_spec, json_schema)
 
 ###### `section_anchor` (string, optional)
@@ -196,12 +196,12 @@ Examples:
 ###### `breadcrumb_path` (string)
 - Purpose: Exact location in YAML tree structure
 - Format: Dot-separated path with array indices
-- Example: `"spec.versions[0].schema.openAPIV3Schema.properties.spec.properties.replicas"`
+- Example: `"spec.versions[0].schema.openAPIV3Schema.properties.spec.replicas"`
 - Usage: Reconstruct YAML tree during re-hydration, precise property lookup
 
 ###### `logical_parent` (string)
 - Purpose: Parent node in tree hierarchy
-- Format: Same as breadcrumb_path but without final segment
+- Format: Dot-separated path of the parent node. It does not always equal `breadcrumb_path` without its final segment: a top-level property keeps the trailing `properties` segment.
 - Example: `"spec.versions[0].schema.openAPIV3Schema.properties.spec.properties"` (parent of replicas)
 - Usage: Group siblings, identify neighbor relationships
 
@@ -209,7 +209,7 @@ Examples:
 - Purpose: Track sibling chunks at same tree level
 - Format: Array of `chunk_id` values
 - Definition: Neighbors = chunks sharing the same `logical_parent`, at any depth
-- Example: `spec.replicas`, `spec.image`, `spec.config` all share parent → All reference each other's chunk IDs
+- Example: `spec.replicas` and `spec.image` share a parent → Both reference each other's chunk IDs. A property that is split, such as `spec.config`, has no chunk of its own, so it is not a neighbor.
 - Empty Array: No neighbors when only child under parent exists
 - Usage: Context expansion - fetch neighbors to provide additional related information
 
@@ -238,7 +238,8 @@ Examples:
 ##### OpenAPI Chunks (`chunk_type: "openapi_spec"`)
 
 **Chunking Strategy**: Element-based recursive chunking with an 800-token limit:
-- Top-level elements (`info`, `servers`, `security`, `tags`) → single chunks
+- Top-level elements (`info`, `security`, `tags`) → single chunks
+- Servers → one chunk for each server
 - Path operations (GET, POST, etc.) → separate chunks per method
 - Component schemas:
   - If ≤ 800 tokens: chunk schema as-is
@@ -249,21 +250,6 @@ Examples:
 - `components.schemas.User` (200 tokens) → single chunk
 - `components.schemas.Order` (1500 tokens, nested properties) → split into `Order.customer`, `Order.items` chunks
 - Path operation `/users.post` with large request/response → single chunk (atomic operation unit)
-
-##### JSON Schema Chunks (`chunk_type: "json_schema"`)
-
-**Chunking Strategy**: Property and definition-based recursive chunking with an 800-token limit:
-- Root metadata (title, description) → single chunk if present
-- Properties:
-  - If ≤ 800 tokens: chunk property as-is with nested content
-  - If > 800 tokens AND has nested `properties`: recurse into nested properties
-  - If > 800 tokens AND has `items.properties` (array): recurse into array item properties
-- Definitions (`$defs` or `definitions`): same recursive logic as properties
-
-Examples:
-- `properties.username` (30 tokens) → single chunk
-- `properties.config` (1000 tokens, nested) → split into `config.database`, `config.cache` chunks
-- `$defs.address` (900 tokens, array items) → split into `address.items.street`, `address.items.city` chunks
 
 ###### `breadcrumb_path` (string)
 - Purpose: Exact location in OpenAPI tree structure
@@ -277,7 +263,8 @@ Examples:
 ###### `logical_parent` (string)
 - Purpose: Parent node in tree hierarchy
 - Examples:
-  - `"root"` (parent of info, servers, security, tags)
+  - `"root"` (parent of info, security, tags)
+  - `"servers"` (parent of each server chunk)
   - `"paths./groups/{id}/access_requests"` (parent of get, post operations)
   - `"components.schemas"` (parent of schema definitions)
 - Usage: Group siblings, identify neighbor relationships
@@ -286,7 +273,8 @@ Examples:
 - Purpose: Track sibling chunks at same tree level
 - Format: Array of `chunk_id` values
 - Examples:
-  - `info`, `servers`, `security`, `tags` (all have parent "root") → All are neighbors
+  - `info`, `security`, `tags` (all have parent "root") → All are neighbors
+  - Several server chunks (all have parent "servers") → They are neighbors
   - GET and POST at same path → They are neighbors
 - Empty Array: Single child under parent (e.g., one server)
 - Usage: Context expansion for related API elements
@@ -337,6 +325,21 @@ Examples:
 - Example: `"ApiKeyAuth"`
 - Usage: Reference security schemes
 
+##### JSON Schema Chunks (`chunk_type: "json_schema"`)
+
+**Chunking Strategy**: Property and definition-based recursive chunking with an 800-token limit:
+- Root metadata (title, description) → single chunk if present
+- Properties:
+  - If ≤ 800 tokens: chunk property as-is with nested content
+  - If > 800 tokens AND has nested `properties`: recurse into nested properties
+  - If > 800 tokens AND has `items.properties` (array): recurse into array item properties
+- Definitions (`$defs` or `definitions`): same recursive logic as properties
+
+Examples:
+- `properties.username` (30 tokens) → single chunk
+- `properties.config` (1000 tokens, nested) → split into `config.database`, `config.cache` chunks
+- `$defs.address` (900 tokens, array items) → split into `address.items.street`, `address.items.city` chunks
+
 ## Extending with Custom Strategies
 
 ### Adding a New Processing Strategy
@@ -366,7 +369,8 @@ To add support for a new content type (e.g., JSON, XML, custom markdown componen
            # Extract content
            content = node.text.removeprefix('{{custom}}').strip()
 
-           # chunk_type must be one of the built-in values. Prose chunks accept
+           # chunk_type must be one of the values in the chunk_type Literal in
+           # opencrane/shared/models/chunk.py. Prose chunks accept
            # only these metadata keys: source_url, breadcrumb_path,
            # section_anchor, tab_value, tab_label, and key.
            metadata = {}
@@ -409,11 +413,13 @@ To add support for a new content type (e.g., JSON, XML, custom markdown componen
 
    OpenCrane loads `.opencrane/extensions.py` only when `.opencrane/config.yaml` sets `extensions: extensions.py`, and the class must be named `Config`. Otherwise, pass the class with `--config`.
 
+   Put `my_strategies.py` in `.opencrane/`, next to `extensions.py`. When OpenCrane loads `extensions.py`, it adds that directory to the Python import path, so the import works.
+
    **Important**: Strategy order matters! First matching strategy wins. Place specific strategies before general ones.
 
 ### Adding a Tree Walker for YAML Standards
 
-To add support for new YAML-based specifications (e.g., AsyncAPI, GraphQL schemas, Terraform):
+To add support for new YAML-based specifications (for example, AsyncAPI or AWS CloudFormation templates):
 
 1. **Create tree walker class**:
 
@@ -539,12 +545,14 @@ To add support for new YAML-based specifications (e.g., AsyncAPI, GraphQL schema
 
    As with strategies, OpenCrane loads this file only when `.opencrane/config.yaml` sets `extensions: extensions.py`.
 
+   The walker runs on YAML that `YamlChunkingStrategy` handles. It does not run on YAML inside fenced code blocks, because `CodeChunkingStrategy` uses only the built-in CRD and OpenAPI walkers.
+
 3. **Add new chunk type to models**:
 
-   Ensure your new chunk type is recognized:
+   Ensure your new chunk type is recognized. This step changes the OpenCrane package itself, not only your configuration:
    - Add `"asyncapi_spec"` to the `chunk_type` `Literal` in `opencrane/shared/models/chunk.py`. Without it, creating the chunk fails validation.
-   - Update documentation to list the new chunk type
-   - Add appropriate metadata fields documentation
+   - Document the new chunk type and its metadata fields in `docs/metadata-schema.md` and in `opencrane/mcp/metadata-schema.md`, which the `get_metadata_schema` MCP tool returns
+   - To let `get_metadata_schema(chunk_type=...)` return the new section, add the chunk type to `_CHUNK_TYPE_SECTION_HEADINGS` in `opencrane/mcp/server.py`
 
 ### Key Concepts
 
@@ -552,4 +560,4 @@ To add support for new YAML-based specifications (e.g., AsyncAPI, GraphQL schema
 - **Tree Walkers**: Specialized processors for structured YAML formats (CRDs, OpenAPI, AsyncAPI)
 - **Priority Order**: Strategies execute in order; first match wins (specific before general)
 - **Neighbor Relationships**: Tree walkers identify sibling chunks for context expansion
-- **Chunk Types**: Use descriptive types (`asyncapi_spec`, `terraform_config`) for filtering and routing
+- **Chunk Types**: Use descriptive types (`asyncapi_spec`, `cloudformation_template`) for filtering and routing

@@ -29,7 +29,12 @@ opencrane inspect
 
 ### Option 2: Docker (HTTP, port 8000)
 
-Run `opencrane init` once to generate `.opencrane/Dockerfile` and `.opencrane/docker-compose.yml`. Then start the server from the project root:
+Run `opencrane init` once to generate `.opencrane/Dockerfile` and `.opencrane/docker-compose.yml`.
+
+> [!CAUTION]
+> By default, the HTTP transport has no authentication and listens on all network interfaces. Anyone who can reach port 8000 can search every source. To restrict access, see [Authentication & Authorization](auth.md).
+
+Then start the server from the project root:
 
 ```bash
 docker-compose -f .opencrane/docker-compose.yml up --build
@@ -56,6 +61,9 @@ claude mcp add my-docs -- uvx --from "git+https://github.com/you/my-docs-mcp" my
 Recipients don't need to rebuild anything — the package includes the Milvus database and chunk index. See `opencrane pack --help` for options.
 
 ### Option 4: Using a Pre-built Docker Image
+
+> [!CAUTION]
+> By default, the HTTP transport has no authentication and listens on all network interfaces. Anyone who can reach port 8000 can search every source. To restrict access, see [Authentication & Authorization](auth.md).
 
 ```bash
 docker run -p 8000:8000 your-registry/your-project-mcp:latest
@@ -186,10 +194,15 @@ Check the health status of the MCP server and its services.
 
 **Parameters:** None
 
-**Returns:** Health status of:
+**Returns:** The same report as the HTTP `GET /health` endpoint: an overall `status` (`healthy`, `degraded`, or `unhealthy`) and these checks:
 - Embeddings service
 - Milvus vector database
-- Collection statistics
+- Collection statistics, such as the row count
+- A real search for one result (query probe)
+- Memory headroom
+- Whether the keyword (BM25) index is loaded in memory
+
+See [Health endpoint](../README.md#health-endpoint-health).
 
 **Example:**
 ```python
