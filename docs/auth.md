@@ -200,7 +200,7 @@ clients must be configured with a token or authorization endpoint directly.
 
 ```yaml
 auth:
-  type: oauth   # or local
+  type: oauth
   oidc: { issuer: ..., audience: ... }
   scope_sources:
     "docs:public":   [public-docs]

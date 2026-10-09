@@ -219,7 +219,12 @@ opencrane embed [--config CLASS] [--chunks-file PATH] [--embeddings-file PATH] [
 opencrane index [--config CLASS]
 ```
 
-When the Milvus collection already has rows, the command skips indexing and keeps the existing data. This also applies to the index step of `opencrane build`. As a result, after a documentation update, `opencrane build` leaves the old data in Milvus. When the collection lacks fields that the current version needs, the command drops and rebuilds it automatically.
+When the Milvus collection already has rows, the command skips indexing and keeps the existing data. This also applies to the index step of `opencrane build`. As a result, after a documentation update, `opencrane build` leaves the old data in Milvus.
+
+> [!CAUTION]
+> After an OpenCrane upgrade, `opencrane index` can delete and rebuild the collection. On a Milvus server that an MCP server already uses, searches fail until the rebuild finishes.
+
+When the collection lacks fields that the current version needs, the command drops and rebuilds it automatically.
 
 > [!CAUTION]
 > `DROP_EXISTING=true` deletes the Milvus collection before the command rebuilds it. On a Milvus server that an MCP server already uses, searches fail until the rebuild finishes. Before you run the command, confirm that the Milvus variables point to the collection that you want to replace.
