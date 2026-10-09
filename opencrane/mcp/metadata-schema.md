@@ -58,7 +58,7 @@ These fields enable tree traversal and context reconstruction:
 ### `neighbor_chunks` (array of UUIDs)
 - **Purpose**: Sibling chunks at same tree level
 - **Definition**: All chunks sharing the same `logical_parent`
-- **Format**: Array of chunk_id UUIDs
+- **Format**: Array of `chunk_id` values
 - **Usage**:
   - **Context Expansion**: Automatically fetch related properties/siblings
   - **Related Info**: Show users other properties at same level

@@ -9,7 +9,7 @@ This document defines the metadata schema for all chunk types. Metadata fields e
 - **Usage**: Provide source attribution in RAG responses
 - **Example**: `"https://github.com/org/repo/blob/main/docs/config.md"` or a rendered docs-site page URL such as `"https://docs.example.com/config"`
 - **How it is set**: Resolved during chunking by joining the clean `llms-full.txt` content to the companion `llms.txt` index per source, validated by the page's H1 title. See [Chunking](chunking.md).
-- **Section anchors (optional)**: By default `source_url` is the page URL only. Projects can opt in to per-section `#anchor` fragments by setting `section_anchors = True` and overriding `anchor_for(page_url, heading)` on their `OpenCraneConfig` subclass in `.opencrane/extensions.py`. The default `anchor_for` returns the page URL unchanged.
+- **Section anchors**: `source_url` is the page URL only. The in-page anchor is stored separately in `section_anchor`, so a direct section link is `{source_url}#{section_anchor}`. Anchors are on by default. To turn them off, set `section_anchor_style: none` in `.opencrane/config.yaml`. To change how slugs are built, override `section_anchor_for(self, heading)` on your `OpenCraneConfig` subclass in `.opencrane/extensions.py`.
 
 ### `original_format` (string, optional)
 - **Purpose**: Original serialization format of content
@@ -51,7 +51,7 @@ These fields enable tree traversal and context reconstruction:
 ### `neighbor_chunks` (array of UUIDs)
 - **Purpose**: Sibling chunks at same tree level
 - **Definition**: All chunks sharing the same `logical_parent`
-- **Format**: Array of chunk_id UUIDs
+- **Format**: Array of `chunk_id` values
 - **Usage**:
   - **Context Expansion**: Automatically fetch related properties/siblings
   - **Related Info**: Show users other properties at same level

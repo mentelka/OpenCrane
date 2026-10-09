@@ -7,7 +7,7 @@ OpenCrane includes a Milvus Lite-based vector search system with MCP (Model Cont
 - **Semantic Search**: Vector similarity using Nomic Embed v1.5 embeddings
 - **Keyword Search**: BM25 ranking without vector database dependency
 - **Hybrid Search**: Weighted combination of semantic + keyword scores
-- **Advanced Filtering**: By chunk type, source file, and metadata content
+- **Advanced Filtering**: By chunk type, source name, and metadata content
 
 ## Getting Started
 
@@ -29,18 +29,18 @@ opencrane inspect
 
 ### Option 2: Docker (HTTP, port 8000)
 
-Run `opencrane init` once to generate the `Dockerfile` and `docker-compose.yml`, then:
+Run `opencrane init` once to generate `.opencrane/Dockerfile` and `.opencrane/docker-compose.yml`. Then start the server from the project root:
 
 ```bash
-docker-compose up --build
-# MCP server available at http://localhost:8000/http
+docker-compose -f .opencrane/docker-compose.yml up --build
+# MCP server available at http://localhost:8000/mcp
 ```
 
 For Podman users:
 
 ```bash
 opencrane init --podman
-podman-compose up --build
+podman-compose -f .opencrane/docker-compose.yml up --build
 ```
 
 ### Option 3: Package for distribution via `uvx`

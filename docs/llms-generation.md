@@ -6,12 +6,12 @@ Use the `llms` command to create flattened text bundles for LLM ingestion:
 opencrane llms --config yourproject.config:YourConfig  # Default: processes configured source directories
 
 # Multiple source directories
-opencrane llms --config yourproject.config:YourConfig --sources-dir external-sources --sources-dir external/docs
+opencrane llms --config yourproject.config:YourConfig --sources-dir .opencrane/sources/my-project --sources-dir docs
 ```
 
 ## Output Control via Source Mapping Config
 
-The source mapping config file (e.g., `source-mapping.yaml`) controls which directories get `llms-full.txt` files generated. This provides fine-grained control over the output structure and prevents unwanted file generation.
+The source mapping file, `.opencrane/config.yaml` by default, controls which directories get `llms-full.txt` files generated. This provides fine-grained control over the output structure and prevents unwanted file generation.
 
 **How it works:**
 - Only paths explicitly listed in the source mapping under the `sources:` key get `llms-full.txt` files generated
@@ -24,11 +24,11 @@ The source mapping config file (e.g., `source-mapping.yaml`) controls which dire
 If your source mapping config contains:
 ```yaml
 sources:
-  external-sources/my-project:
+  my-project:
     url: https://github.com/my-org/my-project
     docs_path: docs
     manual: false
-  external-sources/another-project:
+  another-project:
     url: https://github.com/my-org/another-project
     docs_path: docs
     manual: false
@@ -37,9 +37,9 @@ sources:
 ```
 
 Then generation produces:
-- `llmstxt/external-sources/my-project/llms-full.txt` (includes all markdown from `guides/`, `releases/`, `technical-reference/`, etc.)
-- `llmstxt/external-sources/another-project/llms-full.txt` (includes all markdown recursively)
-- `llmstxt/content-guidelines/writing/llms-full.txt` (reads directly from local `content-guidelines/writing/` directory)
+- `.opencrane/llmstxt/my-project/llms-full.txt` (includes all markdown from `guides/`, `releases/`, `technical-reference/`, etc.)
+- `.opencrane/llmstxt/another-project/llms-full.txt` (includes all markdown recursively)
+- `.opencrane/llmstxt/content-guidelines/writing/llms-full.txt` (reads directly from local `content-guidelines/writing/` directory)
 - No files for `my-project/guides/` or other subdirectories
 
 **Local sources** (`local: true`) are resolved relative to the workspace root instead of `.opencrane/sources/`. This is useful for documentation that already exists in the same repository — no fetching or copying needed.

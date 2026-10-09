@@ -10,7 +10,7 @@ The tool is open-source (Apache 2.0) and platform-agnostic. It can run as a cont
 
 ## Pipeline overview
 
-OpenCrane organizes work into six stages. You can run each stage independently via its CLI subcommand, or run all stages in sequence with `opencrane build`.
+OpenCrane organizes work into stages, and each stage has its own CLI subcommand. You can run each stage on its own, or run the stages from `fetch` to `index` in sequence with `opencrane build`.
 
 ```
 GitHub repositories
@@ -88,13 +88,13 @@ The `opencrane serve` command starts the MCP server backed by the indexed data. 
 
 ## MCP tools
 
-The server exposes up to six tools. The set of tools adapts to the content of the index — `get_yaml_definition`, `get_metadata_schema`, `get_list_members`, and `get_table_members` appear only when the index contains the relevant chunk types.
+The tools the server exposes depend on the content of the index. `search_docs` and `health` are always present. The other tools appear only when the index contains the chunk types they work with, as the following table shows:
 
 | Tool | Condition | Description |
 |---|---|---|
 | `search_docs` | Always present | Hybrid semantic and keyword search across all indexed chunks |
 | `get_yaml_definition` | YAML chunks indexed | Retrieve a complete YAML document by chunk ID, with breadcrumb comments showing its location |
-| `get_metadata_schema` | YAML chunks indexed | Reference documentation for all chunk metadata fields |
+| `get_metadata_schema` | YAML, list, or table row chunks indexed | Reference documentation for all chunk metadata fields |
 | `get_list_members` | List chunks indexed | Retrieve all items in a list by list ID |
 | `get_table_members` | Table row chunks indexed | Retrieve all rows of a table by table ID |
 | `health` | Always present | Service status, Milvus connection state, and collection stats |
@@ -144,20 +144,20 @@ Tree walkers live in `opencrane/rag/services/chunking_strategies/` and handle st
 
 ### MCP server (`opencrane/mcp/`)
 
-The server initializes its backing services lazily on the first tool call, so startup is fast. It holds **no in-memory copy of the corpus** — every tool reads from the vector database:
+With the stdio transport, the server starts its backing services on the first tool call, so startup is fast. The HTTP transport starts them when the server starts. It holds **no in-memory copy of the corpus** — every tool reads from the vector database:
 
 - `get_yaml_definition` fetches a single chunk by its primary key.
 - `get_list_members` and `get_table_members` query the indexed `list_id` / `table_id` columns (constrained to the relevant `chunk_type`) for a list's or table's members.
 - Search reads `token_count` and each chunk's `source_url` straight from the query result rather than re-deriving them.
 
-Which tools are exposed is decided at startup by asking Milvus which `chunk_type` values the collection contains — a light column-only scan (via `query_iterator`, pulling just the `chunk_type` field, never the corpus) whose result is cached for the process. This keeps the tool list correct for any corpus, including custom chunk types, without a separate sidecar file that could get separated from the database. The two backing services are:
+On the first request for the tool list, the server asks Milvus which `chunk_type` values the collection contains, and caches the answer for the life of the process. The query reads only the `chunk_type` field through `query_iterator`, not the chunk content. The tool list then matches the indexed content without a separate file that could get out of sync with the database. The two backing services are:
 
-- **`opencrane/mcp/services/milvus_client.py`** — Manages the Milvus connection and loads the collection into memory at startup for low-latency vector search.
+- **`opencrane/mcp/services/milvus_client.py`** — Manages the connection to Milvus and runs the vector searches.
 - **`opencrane/mcp/services/keyword_search.py`** — Builds a Best Match 25 (BM25) index lazily from `chunks.json` on the first keyword or hybrid query.
 
 ### Configuration (`opencrane/config.py`, `opencrane/shared/config.py`)
 
-`OpenCraneConfig` is the base class for all project-level configuration. It holds three extension-point attributes:
+`OpenCraneConfig` is the base class for all project-level configuration. Its pipeline extension points are the following attributes:
 
 - **`fence_types`** — A dict of fence type handlers. Defaults include OpenAPI, AsyncAPI, CRD, and JSON Schema.
 - **`chunking_strategies`** — An ordered list of chunking strategy instances. Evaluated in order; first match wins.
@@ -167,7 +167,7 @@ Which tools are exposed is decided at startup by asking Milvus which `chunk_type
 
 ## Extension points
 
-You extend OpenCrane by subclassing `OpenCraneConfig` in `.opencrane/extensions.py`. OpenCrane auto-discovers this file. Three extension points are available.
+You extend OpenCrane by subclassing `OpenCraneConfig` in `.opencrane/extensions.py`. OpenCrane auto-discovers this file. This section covers the extension points of the pipeline. For the authentication hooks, see [Authentication & Authorization](auth.md).
 
 ### Custom fence types
 
@@ -200,8 +200,10 @@ To add a chunking strategy, insert it into the `chunking_strategies` list at the
 class Config(OpenCraneConfig):
     chunking_strategies = [
         YamlChunkingStrategy(),
-        MyCustomStrategy(),   # runs before Code and Prose
+        MyCustomStrategy(),   # runs before Code, Table, List, and Prose
         CodeChunkingStrategy(),
+        TableChunkingStrategy(),
+        ListChunkingStrategy(),
         ProseChunkingStrategy(),
     ]
 ```
@@ -229,7 +231,7 @@ The `Chunk` model (`opencrane/shared/models/chunk.py`) is the core data structur
 
 | Field | Type | Description |
 |---|---|---|
-| **chunk_id** | `str` (UUID) | Deterministic UUID, stable across pipeline runs |
+| **chunk_id** | `str` | Deterministic 64-character hex ID, hashed from the chunk content, source file, chunk type, and metadata. Stable across pipeline runs |
 | **content** | `str` or `dict` or `list` | String for prose and code; dict or list for YAML |
 | **source_file** | `str` | Relative path from the workspace root |
 | **source_name** | `str` or `None` | Resolved from **source_url**; `None` if no mapping exists |

@@ -10,22 +10,23 @@ A standalone, extensible RAG/MCP pipeline for building AI-powered documentation 
 - [Installation](#installation)
 - [Usage](#usage)
   - [CLI](#cli)
-    - [init](#opencrane-init----scaffold-a-new-project)
-    - [add](#opencrane-add----add-documentation-sources)
-    - [build](#opencrane-build----full-pipeline)
-    - [fetch](#opencrane-fetch----fetch-docs-from-github)
-    - [llms](#opencrane-llms----generate-llms-fulltxt-bundles)
-    - [tokens](#opencrane-tokens----token-count-report)
-    - [chunk](#opencrane-chunk----chunk-docs-into-rag-chunksjson)
-    - [embed](#opencrane-embed----generate-embeddings)
-    - [index](#opencrane-index----load-into-milvus)
-    - [serve](#opencrane-serve----start-mcp-server)
-    - [pack](#opencrane-pack----package-for-distribution)
-    - [inspect](#opencrane-inspect----launch-mcp-inspector)
-    - [visualize](#opencrane-visualize----see-where-a-paragraph-lands-in-the-embedding-space)
+    - [init](#opencrane-init--scaffold-a-new-project)
+    - [add](#opencrane-add--add-documentation-sources)
+    - [build](#opencrane-build--full-pipeline)
+    - [fetch](#opencrane-fetch--fetch-docs-from-github)
+    - [llms](#opencrane-llms--generate-llms-fulltxt-bundles)
+    - [tokens](#opencrane-tokens--token-count-report)
+    - [chunk](#opencrane-chunk--chunk-docs-into-opencranechunksjson)
+    - [embed](#opencrane-embed--generate-embeddings)
+    - [index](#opencrane-index--load-into-milvus)
+    - [serve](#opencrane-serve--start-mcp-server)
+    - [pack](#opencrane-pack--package-for-distribution)
+    - [inspect](#opencrane-inspect--launch-mcp-inspector)
+    - [visualize](#opencrane-visualize--see-where-a-paragraph-lands-in-the-embedding-space)
+  - [Debugging](#debugging)
   - [Default file and directory names](#default-file-and-directory-names)
   - [Environment variables](#environment-variables)
-  - [Source mapping file](#source-mapping-file-opencraneonfigyaml)
+  - [Source mapping file](#source-mapping-file-opencraneconfigyaml)
 - [Extending OpenCrane](#extending-opencrane)
   - [Extension points](#extension-points)
   - [Section anchors](#section-anchors)
@@ -33,6 +34,7 @@ A standalone, extensible RAG/MCP pipeline for building AI-powered documentation 
   - [Built-in YAML tree walkers](#built-in-yaml-tree-walkers)
   - [Writing a custom fence type](#writing-a-custom-fence-type)
   - [Writing a custom YAML tree walker](#writing-a-custom-yaml-tree-walker)
+- [Authentication & Authorization](#authentication--authorization)
 - [Development](#development)
 - [License](#license)
 
@@ -52,7 +54,7 @@ OpenCrane was born from a real-world use case at [Cennso](https://cennso.com) �
 This project stands on the shoulders of some excellent open-source work:
 
 - [Milvus](https://milvus.io) — vector database powering similarity search
-- [Docling](https://github.com/DS4SD/docling) — document parsing and chunking
+- [Docling](https://github.com/docling-project/docling) — document parsing and chunking
 - [sentence-transformers](https://www.sbert.net) — embedding generation
 - [rank-bm25](https://github.com/dorianbrown/rank_bm25) — BM25 keyword search that complements vector similarity search
 - [Model Context Protocol](https://modelcontextprotocol.io) — MCP server standard that makes the search tools consumable by AI clients
@@ -65,34 +67,36 @@ Scaffold a new project without installing anything:
 uvx opencrane init
 ```
 
-This creates `.opencrane/`, `Dockerfile`, and `docker-compose.yml` in the current directory and walks you through adding documentation sources interactively. Then run `opencrane build` and `opencrane serve`.
+This command creates the `.opencrane/` directory with the project configuration and container files, then prompts you to add documentation sources. To build and serve the index, install OpenCrane with the `pipeline` extra as described in [Installation](#installation). Then run `opencrane build` and `opencrane serve`.
 
 ## Installation
 
+OpenCrane requires Python 3.11 or later. The base package runs the MCP server on an index that is already built. To build an index with the `fetch`, `llms`, `chunk`, and `embed` steps, install the `pipeline` extra:
+
 ```bash
 # with pip
-pip install opencrane
+pip install 'opencrane[pipeline]'
 
 # with uv
-uv pip install opencrane
+uv pip install 'opencrane[pipeline]'
 
 # with uvx (no install needed)
-uvx opencrane <command>
+uvx --from 'opencrane[pipeline]' opencrane {COMMAND}
 ```
 
 ## Usage
 
 ### CLI
 
-All commands accept `--config myproject.config:MyConfig` to load a custom `OpenCraneConfig` subclass.
+Commands that show `[--config CLASS]` in their usage line accept `--config myproject.config:MyConfig` to load a custom `OpenCraneConfig` subclass.
 
 #### `opencrane init` — scaffold a new project
 
 ```bash
-opencrane init [--podman] [--force] [--no-add]
+opencrane init [--podman] [--force] [--no-add] [--extensions]
 ```
 
-Creates the `.opencrane/` directory and container files in the current directory:
+Creates the `.opencrane/` directory with the following files:
 
 | Generated file | Description |
 |---|---|
@@ -103,9 +107,10 @@ Creates the `.opencrane/` directory and container files in the current directory
 
 | Flag | Description |
 |---|---|
-| `--podman` | Generate `Containerfile` instead of `Dockerfile`; README uses `podman` commands |
-| `--force` | Overwrite existing files (default: skip) |
+| `--podman` | Generate `.opencrane/Containerfile` instead of `.opencrane/Dockerfile`; README uses `podman` commands |
+| `--force` | Overwrite existing generated files (default: skip). `.opencrane/config.yaml` is never overwritten |
 | `--no-add` | Skip the interactive source addition prompt (useful for CI/scripts) |
+| `--extensions` | Generate `.opencrane/extensions.py` for custom Python extensions |
 
 > **Convention**: OpenCrane auto-discovers `.opencrane/extensions.py` as the project extensions config, so no `--config` flag or `OPENCRANE_CONFIG` env var is needed when using the `.opencrane/` layout.
 
@@ -143,13 +148,13 @@ Runs all steps in sequence: fetch → llms → chunk → embed → index.
 #### `opencrane fetch` — fetch docs from GitHub
 
 ```bash
-opencrane fetch [--config CLASS] [--org NAME] [--repo PATH_KEY]
+opencrane fetch [--config CLASS] [--org NAME] [--source NAMES]
 ```
 
 | Flag | Description |
 |---|---|
-| `--org NAME` | GitHub organisation to fetch from (overrides `ORG_NAME` env var) |
-| `--repo PATH_KEY` | Fetch only this one repo by its path key in `.opencrane/config.yaml`, e.g. `external-sources/my-repo` (overrides `FETCH_REPO` env var) |
+| `--org NAME` | GitHub organization to fetch from. Also turns on auto-discovery for that organization (overrides `ORG_NAME` env var) |
+| `--source NAMES` | Fetch only these sources, by their path key in `.opencrane/config.yaml`. Takes one name or a comma-separated list, for example `my-repo`. `--repo` is an alias (overrides `FETCH_REPO` env var) |
 
 #### `opencrane llms` — generate llms-full.txt bundles
 
@@ -163,7 +168,7 @@ Emits a clean `llms-full.txt` (no URLs injected into headings) plus a companion 
 |---|---|
 | `--sources-dir PATH` | Source directory to process; repeat for multiple dirs (overrides `AI_DOCS_SOURCES_DIRS` env var) |
 | `--llmstxt-dir PATH` | Output directory for llms-full.txt files (overrides `AI_DOCS_LLMSTXT_DIR` env var) |
-| `--force` | Regenerate even if no git changes are detected in source directories |
+| `--force` | Regenerate even if no git changes are detected in the directories passed with `--sources-dir`. Without `--sources-dir`, the step always regenerates |
 
 #### `opencrane tokens` — token count report
 
@@ -318,9 +323,11 @@ Key flags:
 | `--method pca\|umap\|tsne` | `umap` | Dimensionality-reduction algorithm |
 | `--dim 2\|3` | `3` | Scatter dimensionality |
 | `--viz scatter\|neighbors\|sources\|all` | `all` | Which views to render |
-| `--color-by density\|source` | `density` | Scatter color mapping |
 | `--sample N` | `0` (full corpus) | Cap the scatter at N randomly-sampled chunks (top-K neighbors always included). Use a smaller N if the browser slows down or UMAP / t-SNE is too slow. Neighbor finding always runs on the full corpus regardless. |
 | `--neighbors K` | `12` | Number of nearest neighbors to highlight |
+| `--seed N` | `42` | Random seed for sampling and the reducers, for repeatable output |
+| `--embeddings-file PATH` | `.opencrane/embeddings.json` | Embeddings to place the paragraph against |
+| `--chunks-file PATH` | `.opencrane/chunks.json` | Chunks that match the embeddings |
 | `--output PATH` | `.opencrane/visualization.html` | Output HTML path |
 | `--no-open` | — | Don't auto-open the HTML in a browser |
 
@@ -351,7 +358,7 @@ OpenCrane uses these defaults for all pipeline output. Override them with CLI fl
 | Embeddings file | `.opencrane/embeddings.json` | `--embeddings-file` | `AI_DOCS_EMBEDDINGS_FILE` |
 | Token report output | `.opencrane/llmstxt/README.md` | `--output-file` | `TOKEN_OUTPUT_FILE` |
 | Source mapping file | `.opencrane/config.yaml` | — | `MAPPING_FILE` |
-| Milvus database file (Lite mode) | _(server mode)_ | — | `MILVUS_DB_PATH` |
+| Milvus database file (Lite mode) | `.opencrane/milvus.db` | — | `MILVUS_DB_PATH` |
 
 ### Environment variables
 
@@ -368,17 +375,17 @@ CLI flags take precedence over environment variables. Use env vars for persisten
 | Variable | Default | Description |
 |---|---|---|
 | `ORG_NAME` | `` | GitHub organisation to fetch repositories from (see also `--org` flag) |
-| `FETCH_REPO` | `` | Restrict fetch to a single repo by path key (see also `--repo` flag) |
+| `FETCH_REPO` | `` | Restrict fetch to one or more sources by path key, comma-separated (see also `--source` flag) |
 | `GITHUB_TOKEN` | `` | GitHub API token for authenticated requests |
 | `DOCS_TOPIC` | `documentation` | GitHub topic used to discover repositories automatically within the org |
 | `AUTO_DISCOVERY_ORGS` | `` | Whitelist of orgs where topic-based auto-discovery is enabled |
-| `TARGET_DIR` | `external-sources` | Local directory where fetched docs are stored |
+| `TARGET_DIR` | `.opencrane/sources` | Local directory where fetched docs are stored |
 
 **`llms` step** — only needed if you use `opencrane llms` to generate llms-full.txt bundles:
 
 | Variable | Default | Description |
 |---|---|---|
-| `AI_DOCS_SOURCES_DIRS` | `TARGET_DIR` | **Required when not using `opencrane fetch`.** Comma-separated list of source directories to process (see also `--sources-dir` flag) |
+| `AI_DOCS_SOURCES_DIRS` | none | Comma-separated list of source directories to process (see also `--sources-dir` flag). When empty, the `llms` step processes the sources listed in the source mapping file |
 | `AI_DOCS_LLMSTXT_DIR` | `.opencrane/llmstxt` | Output directory for generated llms-full.txt files (see also `--llmstxt-dir` flag) |
 
 **`tokens` step** — only needed if you use `opencrane tokens`:
@@ -405,11 +412,11 @@ CLI flags take precedence over environment variables. Use env vars for persisten
 
 **`index` and `serve` steps** — needed when loading into Milvus or running the MCP server:
 
-OpenCrane supports two Milvus modes. Set `MILVUS_DB_PATH` to use **Milvus Lite** (a local file, no server needed — good for local dev). Leave it unset to connect to a **Milvus server** via `MILVUS_HOST` and `MILVUS_PORT`.
+OpenCrane supports two Milvus modes. By default it uses **Milvus Lite**, a local database file at `.opencrane/milvus.db` that needs no server. To connect to a **Milvus server** instead, set `MILVUS_DB_PATH` to an empty string and set `MILVUS_HOST` and `MILVUS_PORT`.
 
 | Variable | Default | Description |
 |---|---|---|
-| `MILVUS_DB_PATH` | `` | Path to a local Milvus Lite database file (e.g. `./milvus.db`). When set, `MILVUS_HOST` and `MILVUS_PORT` are ignored |
+| `MILVUS_DB_PATH` | `.opencrane/milvus.db` | Path to the Milvus Lite database file. Set it to an empty string to connect to a Milvus server through `MILVUS_HOST` and `MILVUS_PORT` |
 | `MILVUS_HOST` | `localhost` | Milvus server host (server mode only) |
 | `MILVUS_PORT` | `19530` | Milvus server port (server mode only) |
 | `MILVUS_COLLECTION` | `ai_docs_chunks_v1` | Milvus collection name |
@@ -450,7 +457,7 @@ Example:
 
 ```yaml
 sources:
-  external-sources/my-product:
+  my-product:
     url: https://github.com/myorg/my-product
     docs_path: docs
     docs_url: https://docs.myorg.com/my-product
@@ -468,6 +475,8 @@ from opencrane import OpenCraneConfig
 from opencrane.fences import CodeFenceConfig, inline_file
 from opencrane.rag.services.yaml_chunker import YamlChunkingStrategy
 from opencrane.rag.services.code_chunker import CodeChunkingStrategy
+from opencrane.rag.services.table_chunker import TableChunkingStrategy
+from opencrane.rag.services.list_chunker import ListChunkingStrategy
 from opencrane.rag.services.prose_chunker import ProseChunkingStrategy
 from myproject.strategies.custom import CustomChunkingStrategy
 from myproject.walkers.terraform import TerraformTreeWalker
@@ -481,6 +490,8 @@ class MyConfig(OpenCraneConfig):
         YamlChunkingStrategy(),
         CustomChunkingStrategy(),
         CodeChunkingStrategy(),
+        TableChunkingStrategy(),
+        ListChunkingStrategy(),
         ProseChunkingStrategy(),
     ]
     yaml_tree_walkers = [
@@ -597,7 +608,7 @@ fence_types = {
 ### Writing a custom YAML tree walker
 
 ```python
-from opencrane.walkers.base import YamlTreeWalker
+from opencrane.walkers import YamlTreeWalker
 
 class TerraformTreeWalker(YamlTreeWalker):
     @classmethod

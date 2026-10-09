@@ -1,6 +1,6 @@
 # Source Mapping Configuration
 
-The source mapping config file (e.g., `source-mapping.yaml`) is the control center for documentation processing in an OpenCrane project. It defines which documentation sources exist, where they come from, and how they should be processed.
+The source mapping file, `.opencrane/config.yaml` by default, is the control center for documentation processing in an OpenCrane project. It defines which documentation sources exist, where they come from, and how they should be processed.
 
 ## Purpose
 
@@ -17,7 +17,7 @@ Each entry in the mapping follows this structure:
 
 ```yaml
 sources:
-  external-sources/my-project:           # Relative path (key)
+  my-project:                            # Path key: the source name
     url: https://github.com/my-org/my-project
     docs_path: docs                       # Path within the repository
     manual: false                         # Entry created/updated automatically vs manually maintained
@@ -28,7 +28,7 @@ sources:
 
 Field Descriptions:
 
-- Key (e.g., `external-sources/my-project`): The relative path from workspace root where documentation is stored locally
+- Key (for example `my-project`): The source name. OpenCrane stores a fetched source in `.opencrane/sources/{KEY}`. For a local source, the key is the directory path relative to the workspace root
 - url: Source repository URL for attribution and fetching
 - docs_path: Path within the source repository where docs are located (empty string means root)
 - manual: `false` = entry auto-generated and updated during fetch, `true` = manually added and maintained mapping
@@ -36,14 +36,7 @@ Field Descriptions:
 
 ## Configuring the Source Mapping File Path
 
-In your project config class, set the `SOURCE_MAPPING_FILE` attribute to point to your mapping file:
-
-```python
-from opencrane.config import OpenCraneConfig
-
-class MyProjectConfig(OpenCraneConfig):
-    SOURCE_MAPPING_FILE = "source-mapping.yaml"
-```
+Set the `MAPPING_FILE` environment variable to use a different file. The default is `.opencrane/config.yaml`.
 
 ## Automatic Updates During Fetching
 
@@ -55,8 +48,8 @@ When documentation is fetched, the mapping file is automatically updated:
    - Preserves `manual: true` entries (won't overwrite)
 3. **Removes stale entries** - Repositories that lose the discovery topic are automatically cleaned up:
    - Removes entry from the source mapping file (only if `manual: false`)
-   - Deletes local source directory (e.g., `external-sources/repo-name/`)
-   - Deletes generated output directory (e.g., `llmstxt/external-sources/repo-name/`)
+   - Deletes local source directory (e.g., `.opencrane/sources/repo-name/`)
+   - Deletes generated output directory (e.g., `.opencrane/llmstxt/repo-name/`)
    - Manual entries (`manual: true`) are never removed automatically
 
 This ensures the mapping always reflects the current state of available documentation sources and prevents stale entries from accumulating.
@@ -71,7 +64,7 @@ The key (relative path) in the mapping determines exactly where the generated fi
 
 Mapping entry:
 ```yaml
-external-sources/my-project:
+my-project:
   url: https://github.com/my-org/my-project
   docs_path: docs
   manual: false
@@ -79,7 +72,7 @@ external-sources/my-project:
 
 Generated output:
 ```
-llmstxt/external-sources/my-project/llms-full.txt
+.opencrane/llmstxt/my-project/llms-full.txt
 ```
 
 The output path mirrors the source path, making it easy to understand which source a file came from.
@@ -88,7 +81,7 @@ The output path mirrors the source path, making it easy to understand which sour
 
 When generating `llms-full.txt` for a mapped path:
 
-1. Start at mapped directory: `external-sources/my-project/`
+1. Start at mapped directory: `.opencrane/sources/my-project/`
 2. Recursively collect ALL markdown: Includes `guides/`, `releases/`, `technical-reference/`, etc.
 3. Generate single file: All content goes into one `llms-full.txt` at the mapped path
 4. No subdirectory files: Even if `guides/` has markdown, no `llms-full.txt` is created there
@@ -97,7 +90,7 @@ Example:
 
 ```
 Source structure:
-  external-sources/my-project/
+  .opencrane/sources/my-project/
     README.md
     installation.md
     guides/
@@ -108,11 +101,11 @@ Source structure:
       config.md
 
 Generated output:
-  llmstxt/external-sources/my-project/llms-full.txt  ← Contains ALL 5 files
+  .opencrane/llmstxt/my-project/llms-full.txt  ← Contains ALL 5 files
 
 NOT generated:
-  llmstxt/external-sources/my-project/guides/llms-full.txt  ✗
-  llmstxt/external-sources/my-project/releases/llms-full.txt  ✗
+  .opencrane/llmstxt/my-project/guides/llms-full.txt  ✗
+  .opencrane/llmstxt/my-project/releases/llms-full.txt  ✗
 ```
 
 ## Building page URLs
@@ -132,16 +125,16 @@ This ensures every piece of content is traceable back to its source page.
 
 Mapping:
 ```yaml
-external-sources/my-project:
+my-project:
   url: https://github.com/my-org/my-project
   docs_path: docs
 ```
 
-File location: `external-sources/my-project/guides/setup.md`
+File location: `.opencrane/sources/my-project/guides/setup.md`
 
 Generated entry in `llms.txt`:
 ```markdown
-## external-sources/my-project
+## my-project
 - [Setup Guide](https://github.com/my-org/my-project/blob/main/docs/guides/setup.md)
 ```
 
@@ -180,7 +173,7 @@ sources:
     local: true
 
   # Remote content — fetched from GitHub
-  external-sources/my-project:
+  my-project:
     url: https://github.com/my-org/my-project
     docs_path: docs
     manual: true

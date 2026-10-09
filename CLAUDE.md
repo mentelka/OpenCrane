@@ -85,7 +85,7 @@ add → fetch → llms → chunk → embed → index → serve
 **All tests must be run via `./pytest.sh` and not directly with `pytest` or `python -m pytest`.** This is mandatory because `./pytest.sh` sets PYTHONPATH to the project root, ensuring that the pip-installed `opencrane` package is used correctly.
 
 ```bash
-./pytest.sh                              # All unit tests
+./pytest.sh                              # All tests, unit and integration
 ./pytest.sh --check-coverage             # With 100% coverage enforcement
 ./pytest.sh tests/unit/                  # Unit tests only
 ./pytest.sh tests/integration/           # Integration tests (needs Milvus Lite)
@@ -93,7 +93,7 @@ add → fetch → llms → chunk → embed → index → serve
 
 - **100% code coverage is enforced** — `--cov-fail-under=100` in pytest.ini
 - Test markers: `@pytest.mark.unit`, `@pytest.mark.integration`
-- Integration tests are skipped by default
+- `pytest.ini` deselects integration tests, and `./pytest.sh` selects them again, so `./pytest.sh` with no arguments runs both
 
 ### Test Policy
 
@@ -124,6 +124,8 @@ Subclass `OpenCraneConfig` in `.opencrane/extensions.py` to customize:
 1. **`fence_types`** — custom fence block handlers for llms-full.txt generation
 2. **`chunking_strategies`** — custom chunking strategies (first match wins)
 3. **`yaml_tree_walkers`** — custom YAML tree walkers for structured docs (K8s CRD, OpenAPI, JSON Schema built-in)
+4. **`section_anchor_for`**: builds the in-page anchor slug recorded on each chunk
+5. **`middleware`, `token_verifier`, `auth_provider`**: authentication and authorization hooks for the HTTP transport, see `docs/auth.md`
 
 Config is auto-discovered from `.opencrane/extensions.py:Config` or set via `--config` / `OPENCRANE_CONFIG` env var.
 

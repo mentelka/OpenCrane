@@ -9,7 +9,7 @@ A typical `update-docs.yml` workflow fetches documentation from one or more orga
 - **Auto-discovery**: Repos tagged with a specific topic (e.g., `"documentation"`) are discovered automatically
 - **Manual repositories**: Specific repos can be added in your source mapping config with `manual: true`
 
-**Auto-discovery configuration**: The `AUTO_DISCOVERY_ORGS` environment variable (in your project's config class) controls which orgs have auto-discovery enabled. To enable auto-discovery for additional orgs, set `AUTO_DISCOVERY_ORGS=my-org,other-org`.
+**Auto-discovery configuration**: The `AUTO_DISCOVERY_ORGS` environment variable controls which organizations have auto-discovery turned on. It takes a comma-separated list, for example `AUTO_DISCOVERY_ORGS=my-org,other-org`, and is empty by default. The `--org` flag also turns on auto-discovery for the organization it names.
 
 The workflow makes sure that your project always operates on the latest docs.
 
@@ -36,18 +36,15 @@ Running locally is intended **only for testing purposes** or in exceptional case
 ```bash
 # Fetch from an organization (auto-discovers repos with the configured topic)
 opencrane fetch --config yourproject.config:YourConfig --org my-org
-
-# Force fetch regardless of changes
-opencrane fetch --config yourproject.config:YourConfig --org my-org --force
 ```
 
 ### Fetch a single repository
 
-Use `--repo <path_key>` to restrict the fetch to one specific entry from your source mapping config. The path key is the top-level key under `sources:` in that file (e.g. `external-sources/my-repo`). The org filter is bypassed automatically when `--repo` is used, so no `--org` flag is needed.
+Use `--source {PATH_KEY}` to restrict the fetch to one entry from your source mapping config, or pass a comma-separated list of path keys. The path key is the top-level key under `sources:` in that file, for example `my-repo`. `--repo` is an alias for `--source`. The org filter is bypassed automatically when `--source` is used, so no `--org` flag is needed.
 
 ```bash
 # Fetch only one repo — no --org needed
-opencrane fetch --config yourproject.config:YourConfig --repo external-sources/my-repo
+opencrane fetch --config yourproject.config:YourConfig --source my-repo
 ```
 
 This is useful when you need to refresh a single source without re-fetching the entire set of repositories.

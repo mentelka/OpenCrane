@@ -8,7 +8,7 @@ The Structure-Aware Hybrid Chunker processes documentation into semantically mea
 opencrane chunk --config yourproject.config:YourConfig
 ```
 
-This generates `./rag-chunks.json` with RAG-ready chunks.
+This command writes the chunks to `.opencrane/chunks.json`.
 
 ## How Document Boundaries and `source_url` are Handled
 
@@ -29,7 +29,7 @@ Input (llms-full.txt):          Input (llms.txt):
   ## Prerequisites
   More content...
 
-Output (rag-chunks.json):
+Output (.opencrane/chunks.json):
   {
     "chunk_type": "prose",
     "metadata": {
@@ -59,11 +59,10 @@ The chunker uses a **Strategy Pattern** for extensible format support. It allows
 
 Available Strategies:
 1. **YamlChunkingStrategy** - Detects and processes YAML content; delegates structured YAML specs (e.g., CRDs, OpenAPI) to tree walkers for structured chunking, falls back to generic yaml_content type for other YAML
-2. **TabsChunkingStrategy** - HTML tab components (`<Tabs>`/`<Tab>`) for parallel instructions; processes each tab separately as prose
-3. **CodeChunkingStrategy** - Fenced code blocks with language detection; auto-detects structured YAML specs in YAML code blocks and delegates to tree walkers
-4. **TableChunkingStrategy** - Markdown tables; emits one `table_row` chunk per data row (natural-language rendered, self-linked via `table_id` + `sibling_ids`), and delegates non-table regions to the list and prose strategies
-5. **ListChunkingStrategy** - Markdown lists; emits one chunk per list item
-6. **ProseChunkingStrategy** - Markdown/text with hierarchical headers (fallback strategy)
+2. **CodeChunkingStrategy** - Fenced code blocks with language detection; auto-detects structured YAML specs in YAML code blocks and delegates to tree walkers
+3. **TableChunkingStrategy** - Markdown tables; emits one `table_row` chunk per data row (natural-language rendered, self-linked via `table_id` + `sibling_ids`), and delegates non-table regions to the list and prose strategies
+4. **ListChunkingStrategy** - Markdown lists; emits one chunk per list item
+5. **ProseChunkingStrategy** - Markdown/text with hierarchical headers (fallback strategy)
 
 Strategies are evaluated in order; first match wins.
 
@@ -73,11 +72,11 @@ Strategies are evaluated in order; first match wins.
 
 #### Top-Level Fields
 
-##### `chunk_id` (string, UUID)
+##### `chunk_id` (string)
 - Purpose: Unique identifier for each chunk
-- Format: UUID v4 (e.g., `"d0cdceae-8ab8-4e01-82c6-aa62eb0a3179"`)
+- Format: 64-character hex string
 - Usage: Primary key in Milvus, cross-reference via `neighbor_chunks`, re-hydration, context expansion
-- Generation: Created during chunking using Python's `uuid.uuid4()`
+- Generation: Hashed during chunking from the chunk content, source file, chunk type, and metadata, so the same input produces the same ID on every run
 
 ##### `chunk_type` (string, enum)
 - Purpose: Identifies semantic type of chunk content
@@ -133,15 +132,16 @@ All chunks include a `metadata` object with type-specific fields:
 - Purpose: Original serialization format of content
 - Value: `"yaml"` for YAML chunks
 - Usage: Inform re-hydration process about expected output format
-- Present in: YAML chunks (crd_definition, openapi_spec)
+- Present in: YAML chunks (crd_definition, openapi_spec, json_schema)
 
 ###### `schema_type` (string, enum, optional)
 - Purpose: High-level schema category for YAML content
 - Values:
   - `"k8s_crd"` - Kubernetes Custom Resource Definition
   - `"openapi"` - OpenAPI specification
+  - `"json_schema"` - JSON Schema
 - Usage: Route to appropriate schema validators and processors
-- Present in: YAML chunks (crd_definition, openapi_spec)
+- Present in: YAML chunks (crd_definition, openapi_spec, json_schema)
 
 ##### Prose Chunks (`chunk_type: "prose"`)
 
@@ -193,10 +193,10 @@ Examples:
 - Example: `"spec.versions[0].schema.openAPIV3Schema.properties.spec.properties"` (parent of replicas)
 - Usage: Group siblings, identify neighbor relationships
 
-###### `neighbor_chunks` (array of UUIDs)
+###### `neighbor_chunks` (array of chunk IDs)
 - Purpose: Track sibling chunks at same tree level
-- Format: Array of `chunk_id` UUIDs
-- Definition: Neighbors = chunks sharing the same `logical_parent` (top-level spec properties only)
+- Format: Array of `chunk_id` values
+- Definition: Neighbors = chunks sharing the same `logical_parent`, at any depth
 - Example: `spec.replicas`, `spec.image`, `spec.config` all share parent → All reference each other's UUIDs
 - Empty Array: No neighbors when only child under parent exists
 - Usage: Context expansion - fetch neighbors to provide additional related information
@@ -218,9 +218,9 @@ Examples:
 - Usage: Quick version filtering, distinguish chunks from different CRD versions
 
 ###### `crd_property_path` (string)
-- Purpose: Shortened property path (user-friendly, top-level only)
-- Format: Starts from `spec.`, only top-level properties
-- Example: `"spec.replicas"`, `"spec.config"` (NOT `"spec.config.database"`)
+- Purpose: Property path starting at `spec.`
+- Format: Starts from `spec.`. For a recursively split property, includes the full nested path
+- Example: `"spec.replicas"`, `"spec.config.database"`
 - Usage: Display concise property paths in RAG responses, identify top-level property chunks
 
 ##### OpenAPI Chunks (`chunk_type: "openapi_spec"`)
@@ -270,9 +270,9 @@ Examples:
   - `"components.schemas"` (parent of schema definitions)
 - Usage: Group siblings, identify neighbor relationships
 
-###### `neighbor_chunks` (array of UUIDs)
+###### `neighbor_chunks` (array of chunk IDs)
 - Purpose: Track sibling chunks at same tree level
-- Format: Array of `chunk_id` UUIDs
+- Format: Array of `chunk_id` values
 - Examples:
   - `info`, `servers`, `security`, `tags` (all have parent "root") → All are neighbors
   - GET and POST at same path → They are neighbors
@@ -336,7 +336,7 @@ To add support for a new content type (e.g., JSON, XML, custom markdown componen
    ```python
    from pathlib import Path
    from typing import List
-   from opencrane.rag.base_strategy import ProcessingStrategy
+   from opencrane.rag.services.base_strategy import ProcessingStrategy
    from opencrane.shared.models.chunk import Chunk
 
    class MyCustomStrategy(ProcessingStrategy):
@@ -369,17 +369,27 @@ To add support for a new content type (e.g., JSON, XML, custom markdown componen
            return chunks
    ```
 
-2. **Register in FileProcessor**:
+2. **Register the strategy in your config subclass**:
 
    ```python
-   # opencrane/rag/services/file_processor.py
-   self.strategies = [
-       YamlChunkingStrategy(),      # Priority 1: YAML (delegates to tree walkers)
-       TabsChunkingStrategy(),       # Priority 2: HTML tabs
-       MyCustomStrategy(),           # Priority 3: Your custom strategy
-       CodeChunkingStrategy(),       # Priority 4: Fenced code blocks
-       ProseChunkingStrategy(),      # Priority 5: Prose (fallback)
-   ]
+   # .opencrane/extensions.py
+   from opencrane import OpenCraneConfig
+   from opencrane.rag.services.yaml_chunker import YamlChunkingStrategy
+   from opencrane.rag.services.code_chunker import CodeChunkingStrategy
+   from opencrane.rag.services.table_chunker import TableChunkingStrategy
+   from opencrane.rag.services.list_chunker import ListChunkingStrategy
+   from opencrane.rag.services.prose_chunker import ProseChunkingStrategy
+   from my_strategies import MyCustomStrategy
+
+   class Config(OpenCraneConfig):
+       chunking_strategies = [
+           YamlChunkingStrategy(),   # Priority 1: YAML (delegates to tree walkers)
+           MyCustomStrategy(),       # Priority 2: Your custom strategy
+           CodeChunkingStrategy(),   # Priority 3: Fenced code blocks
+           TableChunkingStrategy(),  # Priority 4: Markdown tables
+           ListChunkingStrategy(),   # Priority 5: Markdown lists
+           ProseChunkingStrategy(),  # Priority 6: Prose (fallback)
+       ]
    ```
 
    **Important**: Strategy order matters! First matching strategy wins. Place specific strategies before general ones.
@@ -392,7 +402,7 @@ To add support for new YAML-based specifications (e.g., AsyncAPI, GraphQL schema
 
    ```python
    from typing import List, Dict, Any
-   from opencrane.walkers.yaml_tree_walker import YamlTreeWalker
+   from opencrane.walkers import YamlTreeWalker
    from opencrane.shared.models.chunk import Chunk
    from opencrane.shared.utils.token_counter import get_token_count
    import yaml
@@ -400,10 +410,15 @@ To add support for new YAML-based specifications (e.g., AsyncAPI, GraphQL schema
    class AsyncAPITreeWalker(YamlTreeWalker):
        """Walk AsyncAPI specification trees and generate element-based chunks."""
 
+       @classmethod
+       def can_handle(cls, doc: dict) -> bool:
+           """Return True for AsyncAPI documents."""
+           return "asyncapi" in doc and "channels" in doc
+
        def __init__(self, yaml_dict: Dict[str, Any], source_url: str,
-                    original_yaml_file: str | None = None):
+                    source_file=None, original_yaml_file: str | None = None):
            """Initialize AsyncAPI tree walker."""
-           super().__init__(yaml_dict, source_url, original_yaml_file)
+           super().__init__(yaml_dict, source_url, source_file, original_yaml_file)
            self.asyncapi_version = self._extract_asyncapi_version()
 
        def _extract_asyncapi_version(self) -> str:
@@ -484,52 +499,21 @@ To add support for new YAML-based specifications (e.g., AsyncAPI, GraphQL schema
                    chunk.metadata["neighbor_chunks"] = neighbor_ids
    ```
 
-2. **Add detection logic**:
+2. **Register the walker in your config subclass**:
 
    ```python
-   # Add to opencrane/rag/services/code_chunker.py or opencrane/shared/utils/yaml_detection.py
+   # .opencrane/extensions.py
+   from opencrane import OpenCraneConfig
+   from my_walkers import AsyncAPITreeWalker
 
-   def is_asyncapi_spec(yaml_dict: dict) -> bool:
-       """Detect if YAML is an AsyncAPI specification."""
-       return "asyncapi" in yaml_dict and "channels" in yaml_dict
+   class Config(OpenCraneConfig):
+       yaml_tree_walkers = [
+           *OpenCraneConfig.yaml_tree_walkers,
+           AsyncAPITreeWalker,
+       ]
    ```
 
-3. **Integrate into CodeChunkingStrategy**:
-
-   ```python
-   # In opencrane/rag/services/code_chunker.py, _create_code_chunk method
-
-   if language.lower() in ['yaml', 'yml']:
-       try:
-           yaml_data = yaml.safe_load(code)
-           if isinstance(yaml_data, dict):
-               config = get_config()
-               if config.yaml_tree_chunking_enabled:
-                   source_url = base_source_url or str(source_file)
-
-                   # Choose appropriate walker
-                   if _is_k8s_crd(yaml_data):
-                       walker = K8sCRDTreeWalker(
-                           yaml_dict=yaml_data,
-                           source_url=source_url
-                       )
-                   elif is_openapi_spec(yaml_data):
-                       walker = OpenAPITreeWalker(
-                           yaml_dict=yaml_data,
-                           source_url=source_url
-                       )
-                   elif is_asyncapi_spec(yaml_data):  # Add your walker
-                       walker = AsyncAPITreeWalker(
-                           yaml_dict=yaml_data,
-                           source_url=source_url
-                       )
-                       return walker.walk()
-                   else:
-                       # Fall through to generic code_snippet
-                       pass
-   ```
-
-4. **Add new chunk type to models**:
+3. **Add new chunk type to models**:
 
    Ensure your new chunk type is recognized:
    - Add `"asyncapi_spec"` to chunk type validation if needed
