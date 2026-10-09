@@ -96,9 +96,9 @@ auth:
     scope_claim: scope                               # JWT claim to read scopes from (default: scope)
     advertised_scopes: [openid]                      # Published as scopes_supported; advertised, never enforced
   scope_sources:
-    "docs:public":   [cennso-glossary]
-    "docs:internal": [cgw, tsr, tposs]
-  default_sources: [cennso-glossary]
+    "docs:public":   [public-docs]
+    "docs:internal": [product-a, product-b]
+  default_sources: [public-docs]
 ```
 
 | Field | Required | Description |
@@ -170,8 +170,8 @@ auth:
     issuer: https://login.example.com/realms/docs
     audience: opencrane-docs
   scope_sources:
-    "docs:internal": [cgw, tsr, tposs]
-  default_sources: [cennso-glossary]
+    "docs:internal": [product-a, product-b]
+  default_sources: [public-docs]
 ```
 
 With `allow_anonymous: true`:
@@ -196,9 +196,9 @@ auth:
   type: oauth   # or local
   oidc: { issuer: ..., audience: ... }
   scope_sources:
-    "docs:public":   [cennso-glossary]
-    "docs:internal": [cgw, tsr, tposs]
-  default_sources: [cennso-glossary]
+    "docs:public":   [public-docs]
+    "docs:internal": [product-a, product-b]
+  default_sources: [public-docs]
 ```
 
 ### Semantics
@@ -268,7 +268,7 @@ class SourceAuthorizer:
 
     async def __call__(self, scope, receive, send):
         if scope.get("type") == "http":
-            set_allowed_sources(["cgw", "npp"])   # () means "no sources permitted"
+            set_allowed_sources(["product-a", "product-b"])   # () means "no sources permitted"
         await self.app(scope, receive, send)
 
 class Config(OpenCraneConfig):
