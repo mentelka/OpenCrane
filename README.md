@@ -102,8 +102,12 @@ Creates the `.opencrane/` directory with the following files:
 |---|---|
 | `.opencrane/config.yaml` | Source mapping and project configuration template with commented remote and local examples |
 | `.opencrane/README.md` | Quick reference for the `.opencrane/` directory |
-| `Dockerfile` | Multi-stage build: deps → model download → Milvus index → runtime |
-| `docker-compose.yml` | Builds and runs the MCP server on port 8000 |
+| `.opencrane/Dockerfile` | Multi-stage build: deps → model download → Milvus index → runtime |
+| `.opencrane/docker-compose.yml` | Builds and runs the MCP server on port 8000 |
+| `.opencrane/extensions.py` | Template for custom Python extensions. Generated only with `--extensions` |
+
+> [!CAUTION]
+> `--force` replaces `.opencrane/README.md`, the container files, and `.opencrane/extensions.py` with fresh templates, so you lose your changes to them. Commit or back up those files before you run `opencrane init --force`.
 
 | Flag | Description |
 |---|---|
@@ -265,7 +269,10 @@ Example response (`200`):
 
 `memory.status` is `unavailable` (and omits the byte fields) when no cgroup limit can be read, e.g. running outside a container. The same report is returned by the `health` MCP tool. The probe and memory thresholds are tunable — see the [health-check environment variables](#health-check-serve-http-transport).
 
-> **Deploying the probe:** point the platform's liveness/readiness probe at `GET /health` on port 8000. Give the startup/initial-delay enough time for the embedding model to load (until then `/health` returns `503 initializing`), and use a longer liveness period so a real search isn't run every few seconds. **Do not bind-mount the Milvus Lite database** — Milvus Lite cannot open its `.db` from a bind-mounted volume (`Open local milvus failed`); bake it into the image with `COPY` instead (the generated `Dockerfile` already does this by building the DB in a dedicated stage).
+To deploy the probe, point the platform's liveness/readiness probe at `GET /health` on port 8000. Give the startup/initial-delay enough time for the embedding model to load (until then `/health` returns `503 initializing`), and use a longer liveness period so a real search isn't run every few seconds.
+
+> [!IMPORTANT]
+> Do not bind-mount the Milvus Lite database. Milvus Lite cannot open its `.db` file from a bind-mounted volume and fails with `Open local milvus failed`. Copy the database into the image with `COPY` instead. The generated `.opencrane/Dockerfile` does this in a dedicated build stage.
 
 #### `opencrane pack` — package for distribution
 

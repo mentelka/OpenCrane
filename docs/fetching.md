@@ -15,6 +15,9 @@ The workflow makes sure that your project always operates on the latest docs.
 
 ## Automatic Cleanup
 
+> [!CAUTION]
+> When a repository loses the discovery topic, `opencrane fetch` deletes its local source directory and its generated `llmstxt/` output. To keep a source that does not carry the topic, set `manual: true` on its entry.
+
 The fetch process automatically cleans up stale documentation sources:
 
 - **Stale Detection**: Repositories that **lose the discovery topic** are identified and removed

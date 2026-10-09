@@ -40,6 +40,9 @@ Set the `MAPPING_FILE` environment variable to use a different file. The default
 
 ## Automatic Updates During Fetching
 
+> [!CAUTION]
+> When a repository loses the discovery topic, `opencrane fetch` deletes its local source directory and its generated `llmstxt/` output. To keep a source that does not carry the topic, set `manual: true` on its entry.
+
 When documentation is fetched, the mapping file is automatically updated:
 
 1. Script discovers repositories with the configured topic via GitHub API

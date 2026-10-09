@@ -137,6 +137,9 @@ By default OpenCrane requires the token's `aud` claim to match `oidc.audience`. 
 
 Some IdPs, however, cannot put the audience into the token. Notably **Ory Hydra does not honor the RFC 8707 `resource` parameter** that MCP clients (e.g. Claude Code) send on the authorize request, so it issues access tokens with an **empty `aud`** — and every request is then rejected as `invalid_token`. There is no Ory-side setting that fixes this.
 
+> [!CAUTION]
+> With `verify_audience: false`, OpenCrane accepts any token that this identity provider issued, including tokens issued for other services. Use it only when the identity provider cannot set the audience, and add an application-level check in a `middleware` authorizer, for example on the `client_id` or `azp` claim.
+
 For such IdPs, set `verify_audience: false`. Signature, issuer, and expiry are still enforced; only the audience check is skipped:
 
 ```yaml
@@ -152,7 +155,12 @@ This is a deliberate security trade-off — a token this IdP issues for any reso
 ### Optional authentication (`allow_anonymous`)
 
 By default `oauth` mode requires a valid bearer token on every request (tokenless
-requests get `401`). Set `allow_anonymous: true` to make the token **optional**:
+requests get `401`).
+
+> [!IMPORTANT]
+> With `allow_anonymous: true`, anyone can read the sources in `default_sources` without a token. List only public documentation in `default_sources`.
+
+Set `allow_anonymous: true` to make the token **optional**:
 
 ```yaml
 auth:
@@ -236,7 +244,8 @@ class Config(OpenCraneConfig):
     auth_provider = MyAuthProvider()
 ```
 
-If neither hook is set, `custom` type is treated as open (no auth) — this lets you set `auth.type: custom` without wiring a provider yet.
+> [!CAUTION]
+> If neither hook is set, the `custom` type runs with no authentication and accepts every request. Set `token_verifier` or `auth_provider` before you expose the server.
 
 ---
 
